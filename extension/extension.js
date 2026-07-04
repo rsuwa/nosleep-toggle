@@ -17,7 +17,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         super._init(0.0, 'NoSleep Toggle');
 
         this._extensionDir = extensionDir;
-        this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleepctl']);
+        this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleep']);
         this._enabled = false;
         this._refreshSourceId = 0;
 
@@ -87,7 +87,7 @@ class NoSleepIndicator extends PanelMenu.Button {
             const [, stdout, stderr] = proc.communicate_utf8(null, null);
 
             if (!proc.get_successful()) {
-                const message = (stderr || stdout || 'nosleepctl failed').trim();
+                const message = (stderr || stdout || 'nosleep failed').trim();
                 throw new Error(message);
             }
 

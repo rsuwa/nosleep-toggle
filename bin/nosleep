@@ -1,37 +1,182 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-  cat <<'EOF'
-Usage:
-  nosleep                 Start an inhibited shell. Type "exit" to release.
-  nosleep <command> [...] Run a command while sleep/lid-close suspend is blocked.
-  nosleep --status        Show active systemd inhibitors.
-
-Examples:
-  nosleep
-  nosleep codex
-  nosleep claude
-  nosleep bash -lc 'codex'
-EOF
-}
-
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
-
-if [[ "${1:-}" == "--status" ]]; then
-  exec systemd-inhibit --list --no-pager
-fi
+runtime_base="${XDG_RUNTIME_DIR:-/tmp}"
+state_dir="$runtime_base/nosleep"
+pid_file="$state_dir/inhibit.pid"
+lock_file="$state_dir/lock"
 
 what="handle-lid-switch:sleep:idle"
 who="nosleep"
 why="keep CLI agents running while lid is closed"
 
-if [[ $# -eq 0 ]]; then
+mkdir -p "$state_dir"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  nosleep on              Block sleep, idle sleep, and lid-close suspend.
+  nosleep off             Stop the persistent blocker.
+  nosleep toggle          Toggle the persistent blocker.
+  nosleep status          Print "on" or "off".
+  nosleep shell           Start an inhibited shell. Type "exit" to release.
+  nosleep run <command>   Run a command while sleep is blocked.
+  nosleep <command> [...] Shortcut for "nosleep run <command> [...]".
+
+Examples:
+  nosleep on
+  nosleep off
+  nosleep status
+  nosleep codex
+  nosleep claude
+  nosleep run bash -lc 'codex'
+EOF
+}
+
+read_pid() {
+  [[ -r "$pid_file" ]] || return 1
+
+  local pid
+  pid="$(<"$pid_file")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+is_running() {
+  local pid cmdline
+  pid="$(read_pid)" || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+
+  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
+  [[ "$cmdline" == *"systemd-inhibit"* && "$cmdline" == *"$who"* ]]
+}
+
+cleanup_stale_pid() {
+  if ! is_running; then
+    rm -f "$pid_file"
+  fi
+}
+
+start_blocker() {
+  cleanup_stale_pid
+  if is_running; then
+    printf 'on\n'
+    return 0
+  fi
+
+  setsid systemd-inhibit \
+    --what="$what" \
+    --mode=block \
+    --who="$who" \
+    --why="$why" \
+    sleep infinity >/dev/null 2>&1 9>&- &
+
+  printf '%s\n' "$!" >"$pid_file"
+  sleep 0.2
+
+  if ! is_running; then
+    rm -f "$pid_file"
+    printf 'failed to start systemd-inhibit\n' >&2
+    return 1
+  fi
+
+  printf 'on\n'
+}
+
+stop_blocker() {
+  local pid
+  pid="$(read_pid 2>/dev/null || true)"
+
+  if [[ -n "$pid" ]] && is_running; then
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+
+    for _ in {1..20}; do
+      if ! is_running; then
+        break
+      fi
+      sleep 0.1
+    done
+
+    if is_running; then
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  rm -f "$pid_file"
+  printf 'off\n'
+}
+
+status() {
+  cleanup_stale_pid
+  if is_running; then
+    printf 'on\n'
+  else
+    printf 'off\n'
+  fi
+}
+
+run_shell() {
   printf 'nosleep active: lid-close suspend and idle sleep are blocked. Type "exit" to release.\n' >&2
   exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "${SHELL:-/bin/bash}"
-fi
+}
 
-exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "$@"
+run_command() {
+  if [[ $# -eq 0 ]]; then
+    usage >&2
+    exit 2
+  fi
+
+  exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "$@"
+}
+
+command="${1:-}"
+
+case "$command" in
+  -h|--help|help)
+    usage
+    ;;
+  --status)
+    exec systemd-inhibit --list --no-pager
+    ;;
+  "")
+    run_shell
+    ;;
+  shell)
+    run_shell
+    ;;
+  on)
+    exec 9>"$lock_file"
+    flock -x 9
+    start_blocker
+    ;;
+  off)
+    exec 9>"$lock_file"
+    flock -x 9
+    stop_blocker
+    ;;
+  toggle)
+    exec 9>"$lock_file"
+    flock -x 9
+    if is_running; then
+      stop_blocker
+    else
+      start_blocker
+    fi
+    ;;
+  status)
+    exec 9>"$lock_file"
+    flock -s 9
+    status
+    ;;
+  run)
+    shift
+    run_command "$@"
+    ;;
+  --)
+    shift
+    run_command "$@"
+    ;;
+  *)
+    run_command "$@"
+    ;;
+esac

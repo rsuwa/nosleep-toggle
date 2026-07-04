@@ -14,8 +14,8 @@ remove_owned_link() {
   fi
 }
 
-if command -v nosleepctl >/dev/null 2>&1; then
-  nosleepctl off >/dev/null 2>&1 || true
+if command -v nosleep >/dev/null 2>&1; then
+  nosleep off >/dev/null 2>&1 || true
 fi
 
 if command -v gnome-extensions >/dev/null 2>&1; then
@@ -23,7 +23,6 @@ if command -v gnome-extensions >/dev/null 2>&1; then
 fi
 
 remove_owned_link "$HOME/.local/bin/nosleep" "$repo_root/bin/nosleep"
-remove_owned_link "$HOME/.local/bin/nosleepctl" "$repo_root/bin/nosleepctl"
 remove_owned_link "$HOME/.local/share/gnome-shell/extensions/$extension_uuid" "$repo_root/extension"
 
 printf 'Uninstalled nosleep-toggle links. Source repo remains at %s\n' "$repo_root"

@@ -26,11 +26,10 @@ link_path() {
   ln -s "$target" "$link"
 }
 
-chmod +x "$repo_root/bin/nosleep" "$repo_root/bin/nosleepctl"
+chmod +x "$repo_root/bin/nosleep"
 
 mkdir -p "$bin_dir" "$extension_root"
 link_path "$repo_root/bin/nosleep" "$bin_dir/nosleep"
-link_path "$repo_root/bin/nosleepctl" "$bin_dir/nosleepctl"
 link_path "$repo_root/extension" "$extension_root/$extension_uuid"
 
 if command -v gnome-extensions >/dev/null 2>&1; then
