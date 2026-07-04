@@ -8,6 +8,7 @@ else
 fi
 
 pid_file="$state_dir/inhibit.pid"
+start_file="$state_dir/inhibit.start"
 lock_file="$state_dir/lock"
 
 what="handle-lid-switch:sleep:idle"
@@ -65,13 +66,52 @@ read_pid() {
 }
 
 is_persistent_running() {
-  local pid cmdline
+  local pid
   pid="$(read_pid)" || return 1
-  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  process_matches_persistent "$pid" || return 1
+  process_matches_recorded_start "$pid"
+}
 
-  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
-  [[ "$cmdline" == *"systemd-inhibit"* ]] || return 1
-  [[ "$cmdline" == *"$who_persistent"* || "$cmdline" == *"--who=$who_legacy "* ]]
+process_matches_persistent() {
+  local pid="$1"
+  local argv
+
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  argv="$(tr '\0' '\n' 2>/dev/null <"/proc/$pid/cmdline")" || return 1
+
+  grep -E '(^|/)systemd-inhibit$' <<<"$argv" >/dev/null || return 1
+  grep -Fx -- "--who=$who_persistent" <<<"$argv" >/dev/null \
+    || grep -Fx -- "--who=$who_legacy" <<<"$argv" >/dev/null
+}
+
+process_start_time() {
+  local pid="$1"
+  local stat fields
+
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  IFS= read -r stat 2>/dev/null <"/proc/$pid/stat" || return 1
+  fields="${stat##*) }"
+  set -- $fields
+  [[ "${20:-}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${20}"
+}
+
+process_matches_recorded_start() {
+  local pid="$1"
+  local recorded current
+
+  [[ -r "$start_file" ]] || return 0
+  recorded="$(<"$start_file")"
+  [[ "$recorded" =~ ^[0-9]+$ ]] || return 1
+  current="$(process_start_time "$pid")" || return 1
+  [[ "$recorded" == "$current" ]]
+}
+
+process_has_recorded_identity() {
+  local pid="$1"
+  [[ -r "$start_file" ]] || return 1
+  process_matches_persistent "$pid" || return 1
+  process_matches_recorded_start "$pid"
 }
 
 is_temporary_running() {
@@ -97,7 +137,7 @@ inhibitors_include_temporary() {
 
 cleanup_stale_pid() {
   if ! is_persistent_running; then
-    rm -f "$pid_file"
+    rm -f "$pid_file" "$start_file"
   fi
 }
 
@@ -115,11 +155,16 @@ start_blocker() {
     --why="$why" \
     sleep infinity >/dev/null 2>&1 9>&- &
 
-  printf '%s\n' "$!" >"$pid_file"
+  local pid start_time
+  pid="$!"
+  printf '%s\n' "$pid" >"$pid_file"
+  if start_time="$(process_start_time "$pid" 2>/dev/null)"; then
+    printf '%s\n' "$start_time" >"$start_file"
+  fi
   sleep 0.2
 
   if ! is_persistent_running; then
-    rm -f "$pid_file"
+    rm -f "$pid_file" "$start_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
   fi
@@ -128,11 +173,20 @@ start_blocker() {
 }
 
 stop_blocker() {
-  local pid
+  local pid kill_group
   pid="$(read_pid 2>/dev/null || true)"
+  kill_group=0
 
   if [[ -n "$pid" ]] && is_persistent_running; then
-    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    if process_has_recorded_identity "$pid"; then
+      kill_group=1
+    fi
+
+    if [[ "$kill_group" -eq 1 ]]; then
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
 
     for _ in {1..20}; do
       if ! is_persistent_running; then
@@ -142,11 +196,15 @@ stop_blocker() {
     done
 
     if is_persistent_running; then
-      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      if [[ "$kill_group" -eq 1 ]]; then
+        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      else
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
     fi
   fi
 
-  rm -f "$pid_file"
+  rm -f "$pid_file" "$start_file"
   status
 }
 
