@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  nosleep                 Start an inhibited shell. Type "exit" to release.
+  nosleep <command> [...] Run a command while sleep/lid-close suspend is blocked.
+  nosleep --status        Show active systemd inhibitors.
+
+Examples:
+  nosleep
+  nosleep codex
+  nosleep claude
+  nosleep bash -lc 'codex'
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${1:-}" == "--status" ]]; then
+  exec systemd-inhibit --list --no-pager
+fi
+
+what="handle-lid-switch:sleep:idle"
+who="nosleep"
+why="keep CLI agents running while lid is closed"
+
+if [[ $# -eq 0 ]]; then
+  printf 'nosleep active: lid-close suspend and idle sleep are blocked. Type "exit" to release.\n' >&2
+  exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "${SHELL:-/bin/bash}"
+fi
+
+exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "$@"

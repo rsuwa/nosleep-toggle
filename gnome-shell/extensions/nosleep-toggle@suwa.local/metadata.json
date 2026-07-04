@@ -1,0 +1,7 @@
+{
+  "uuid": "nosleep-toggle@suwa.local",
+  "name": "NoSleep Toggle",
+  "description": "Toggle lid-close and idle sleep inhibition from the GNOME top bar.",
+  "shell-version": ["46"],
+  "version": 1
+}

@@ -1,0 +1,4 @@
+.cache/
+*.shell-extension.zip
+*.tmp
+*~
