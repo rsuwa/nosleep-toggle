@@ -9,7 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-const UUID = 'nosleep-toggle@suwa.local';
+const UUID = 'nosleep-toggle@systemd-inhibit.local';
 
 const NoSleepIndicator = GObject.registerClass(
 class NoSleepIndicator extends PanelMenu.Button {

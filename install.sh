@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bin_dir="$HOME/.local/bin"
 extension_root="$HOME/.local/share/gnome-shell/extensions"
-extension_uuid="nosleep-toggle@suwa.local"
+extension_uuid="nosleep-toggle@systemd-inhibit.local"
 
 link_path() {
   local target="$1"
@@ -31,7 +31,7 @@ chmod +x "$repo_root/bin/nosleep" "$repo_root/bin/nosleepctl"
 mkdir -p "$bin_dir" "$extension_root"
 link_path "$repo_root/bin/nosleep" "$bin_dir/nosleep"
 link_path "$repo_root/bin/nosleepctl" "$bin_dir/nosleepctl"
-link_path "$repo_root/gnome-shell/extensions/$extension_uuid" "$extension_root/$extension_uuid"
+link_path "$repo_root/extension" "$extension_root/$extension_uuid"
 
 if command -v gnome-extensions >/dev/null 2>&1; then
   gnome-extensions enable "$extension_uuid" >/dev/null 2>&1 || true
