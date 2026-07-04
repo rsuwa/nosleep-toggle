@@ -18,8 +18,8 @@ Ubuntu 22.04 / GNOME Shell 42 is not supported yet.
 ## Install
 
 ```bash
-git clone git@github.com:rsuwa/nosleep-toggle.git ~/oss/nosleep-toggle
-cd ~/oss/nosleep-toggle
+git clone https://github.com/rsuwa/nosleep-toggle.git
+cd nosleep-toggle
 ./install.sh
 ```
 
