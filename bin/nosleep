@@ -75,8 +75,24 @@ is_persistent_running() {
 }
 
 is_temporary_running() {
-  systemd-inhibit --list --no-pager --no-legend 2>/dev/null \
-    | grep -F "$who_running" >/dev/null
+  local inhibitors
+  inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
+  inhibitors_include_temporary "$inhibitors"
+}
+
+list_inhibitors() {
+  systemd-inhibit --list --no-pager --no-legend
+}
+
+inhibitors_include_persistent() {
+  local inhibitors="$1"
+  grep -F "$who_persistent" <<<"$inhibitors" >/dev/null \
+    || grep -E "^${who_legacy}[[:space:]]" <<<"$inhibitors" >/dev/null
+}
+
+inhibitors_include_temporary() {
+  local inhibitors="$1"
+  grep -F "$who_running" <<<"$inhibitors" >/dev/null
 }
 
 cleanup_stale_pid() {
@@ -135,10 +151,25 @@ stop_blocker() {
 }
 
 status() {
+  local inhibitors
+
   cleanup_stale_pid
+
+  if ! inhibitors="$(list_inhibitors 2>/dev/null)"; then
+    if is_persistent_running; then
+      printf 'on\n'
+      return 0
+    fi
+
+    printf 'failed to query systemd inhibitors\n' >&2
+    return 1
+  fi
+
   if is_persistent_running; then
     printf 'on\n'
-  elif is_temporary_running; then
+  elif inhibitors_include_persistent "$inhibitors"; then
+    printf 'on\n'
+  elif inhibitors_include_temporary "$inhibitors"; then
     printf 'running\n'
   else
     printf 'off\n'
