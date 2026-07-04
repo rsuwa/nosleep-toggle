@@ -91,6 +91,7 @@ process_start_time() {
   [[ -r "/proc/$pid/stat" ]] || return 1
   IFS= read -r stat 2>/dev/null <"/proc/$pid/stat" || return 1
   fields="${stat##*) }"
+  # shellcheck disable=SC2086 # Split /proc stat fields into positional parameters.
   set -- $fields
   [[ "${20:-}" =~ ^[0-9]+$ ]] || return 1
   printf '%s\n' "${20}"

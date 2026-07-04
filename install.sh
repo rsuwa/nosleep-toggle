@@ -20,7 +20,9 @@ done
 
 backup_path() {
   local link="$1"
-  local backup="${link}.bak.$(date +%Y%m%d%H%M%S)"
+  local backup
+
+  backup="${link}.bak.$(date +%Y%m%d%H%M%S)"
 
   mv "$link" "$backup"
   printf 'Backed up %s to %s\n' "$link" "$backup"
