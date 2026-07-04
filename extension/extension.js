@@ -191,6 +191,9 @@ class NoSleepIndicator extends PanelMenu.Button {
             } else if (state === 'off') {
                 this._setState('off');
                 Main.notify('NoSleep', 'Sleep behavior is back to normal.');
+            } else if (state === 'running') {
+                this._setState('running');
+                Main.notify('NoSleep', 'Sleep is still blocked while a command is running.');
             }
         } finally {
             this._actionInFlight = false;

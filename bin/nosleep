@@ -147,7 +147,7 @@ stop_blocker() {
   fi
 
   rm -f "$pid_file"
-  printf 'off\n'
+  status
 }
 
 status() {
