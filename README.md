@@ -12,6 +12,7 @@ It is intended for short moves while a long-running CLI command keeps running.
 - Ubuntu 24.04
 - GNOME Shell 46
 - systemd
+- `systemd-inhibit`, `setsid`, and `flock`
 
 Ubuntu 22.04 / GNOME Shell 42 is not supported yet.
 
@@ -23,7 +24,18 @@ cd nosleep-toggle
 ./install.sh
 ```
 
+The installer creates symlinks into this checkout.
+Keep the cloned repository in place after installation.
+
 If GNOME Shell does not detect the new extension immediately, log out and log back in.
+
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+The uninstaller turns persistent NoSleep off, disables the extension when possible, and removes only symlinks that point to this checkout.
 
 ## Usage
 
@@ -47,6 +59,7 @@ nosleep status
 ```
 
 `nosleep status` prints `off`, `on`, or `running`.
+`nosleep --status` prints the raw `systemd-inhibit` list for troubleshooting.
 
 Use the same `nosleep` command to inhibit sleep only while a command runs:
 
@@ -54,12 +67,27 @@ Use the same `nosleep` command to inhibit sleep only while a command runs:
 nosleep long-command --option
 nosleep run long-command --option
 nosleep shell
+nosleep
 ```
 
 `nosleep run ...` is the explicit form.
 Use it when the command name conflicts with a `nosleep` subcommand.
+Running `nosleep` without arguments starts an inhibited shell.
+
+## Test
+
+```bash
+./tests/run.sh
+```
+
+The test script uses temporary runtime and home directories.
+It skips the CLI state test if another `nosleep` inhibitor is already active.
 
 ## Safety
 
 Running a laptop while it is inside a bag can generate heat.
 Use this for short moves, not long unattended runs.
+
+NoSleep does not block shutdown, hibernate, critical battery actions, thermal shutdown, administrator policy, crashes, logout, or system updates.
+Disabling the GNOME extension removes the top-bar control, but it does not guarantee that an already active persistent inhibitor is stopped.
+Run `nosleep off` before disabling the extension if NoSleep is active.
