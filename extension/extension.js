@@ -10,6 +10,10 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const UUID = 'nosleep-toggle@systemd-inhibit.local';
+const REFRESH_INTERVAL_SECONDS = 3;
+const COMMAND_TIMEOUT_SECONDS = 5;
+
+Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 
 const STATES = {
     off: {
@@ -47,6 +51,9 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleep']);
         this._state = 'off';
         this._refreshSourceId = 0;
+        this._refreshInFlight = false;
+        this._actionInFlight = false;
+        this._destroyed = false;
 
         this._buildPanelButton();
         this._buildMenu();
@@ -54,7 +61,7 @@ class NoSleepIndicator extends PanelMenu.Button {
 
         this._refreshSourceId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
-            3,
+            REFRESH_INTERVAL_SECONDS,
             () => {
                 this._refresh();
                 return GLib.SOURCE_CONTINUE;
@@ -106,13 +113,32 @@ class NoSleepIndicator extends PanelMenu.Button {
         return new Gio.FileIcon({file: Gio.File.new_for_path(path)});
     }
 
-    _runCtl(args) {
+    async _runCtl(args, {notify = true} = {}) {
+        const cancellable = new Gio.Cancellable();
+        let proc = null;
+        let cancelId = 0;
+        let timeoutId = 0;
+        let timedOut = false;
+
         try {
-            const proc = Gio.Subprocess.new(
+            proc = Gio.Subprocess.new(
                 [this._ctlPath, ...args],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
             );
-            const [, stdout, stderr] = proc.communicate_utf8(null, null);
+
+            cancelId = cancellable.connect(() => proc.force_exit());
+            timeoutId = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT,
+                COMMAND_TIMEOUT_SECONDS,
+                () => {
+                    timeoutId = 0;
+                    timedOut = true;
+                    cancellable.cancel();
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+
+            const [stdout, stderr] = await proc.communicate_utf8_async(null, cancellable);
 
             if (!proc.get_successful()) {
                 const message = (stderr || stdout || 'nosleep failed').trim();
@@ -121,27 +147,53 @@ class NoSleepIndicator extends PanelMenu.Button {
 
             return (stdout || '').trim();
         } catch (error) {
-            logError(error);
-            Main.notify('NoSleep', error.message);
+            if (notify) {
+                logError(error);
+                Main.notify('NoSleep', timedOut ? 'nosleep timed out' : error.message);
+            }
             return null;
+        } finally {
+            if (timeoutId)
+                GLib.Source.remove(timeoutId);
+            if (cancelId)
+                cancellable.disconnect(cancelId);
         }
     }
 
-    _refresh() {
-        const state = this._runCtl(['status']);
-        if (state && STATES[state])
-            this._setState(state);
+    async _refresh() {
+        if (this._refreshInFlight)
+            return;
+
+        this._refreshInFlight = true;
+        try {
+            const state = await this._runCtl(['status'], {notify: false});
+            if (!this._destroyed && state && STATES[state])
+                this._setState(state);
+        } finally {
+            this._refreshInFlight = false;
+        }
     }
 
-    _toggle() {
+    async _toggle() {
+        if (this._actionInFlight)
+            return;
+
+        this._actionInFlight = true;
         const command = this._state === 'on' ? 'off' : 'on';
-        const state = this._runCtl([command]);
-        if (state === 'on') {
-            this._setState('on');
-            Main.notify('NoSleep', 'Sleep is blocked until you turn NoSleep off.');
-        } else if (state === 'off') {
-            this._setState('off');
-            Main.notify('NoSleep', 'Sleep behavior is back to normal.');
+        try {
+            const state = await this._runCtl([command]);
+            if (this._destroyed)
+                return;
+
+            if (state === 'on') {
+                this._setState('on');
+                Main.notify('NoSleep', 'Sleep is blocked until you turn NoSleep off.');
+            } else if (state === 'off') {
+                this._setState('off');
+                Main.notify('NoSleep', 'Sleep behavior is back to normal.');
+            }
+        } finally {
+            this._actionInFlight = false;
         }
     }
 
@@ -171,6 +223,8 @@ class NoSleepIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._destroyed = true;
+
         if (this._refreshSourceId) {
             GLib.Source.remove(this._refreshSourceId);
             this._refreshSourceId = 0;
