@@ -7,7 +7,9 @@ pid_file="$state_dir/inhibit.pid"
 lock_file="$state_dir/lock"
 
 what="handle-lid-switch:sleep:idle"
-who="nosleep"
+who_persistent="nosleep:persistent"
+who_running="nosleep:running"
+who_legacy="nosleep"
 why="keep CLI agents running while lid is closed"
 
 mkdir -p "$state_dir"
@@ -18,7 +20,7 @@ Usage:
   nosleep on              Block sleep, idle sleep, and lid-close suspend.
   nosleep off             Stop the persistent blocker.
   nosleep toggle          Toggle the persistent blocker.
-  nosleep status          Print "on" or "off".
+  nosleep status          Print "on", "running", or "off".
   nosleep shell           Start an inhibited shell. Type "exit" to release.
   nosleep run <command>   Run a command while sleep is blocked.
   nosleep <command> [...] Shortcut for "nosleep run <command> [...]".
@@ -42,24 +44,30 @@ read_pid() {
   printf '%s\n' "$pid"
 }
 
-is_running() {
+is_persistent_running() {
   local pid cmdline
   pid="$(read_pid)" || return 1
   [[ -r "/proc/$pid/cmdline" ]] || return 1
 
   cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
-  [[ "$cmdline" == *"systemd-inhibit"* && "$cmdline" == *"$who"* ]]
+  [[ "$cmdline" == *"systemd-inhibit"* ]] || return 1
+  [[ "$cmdline" == *"$who_persistent"* || "$cmdline" == *"--who=$who_legacy "* ]]
+}
+
+is_temporary_running() {
+  systemd-inhibit --list --no-pager --no-legend 2>/dev/null \
+    | grep -F "$who_running" >/dev/null
 }
 
 cleanup_stale_pid() {
-  if ! is_running; then
+  if ! is_persistent_running; then
     rm -f "$pid_file"
   fi
 }
 
 start_blocker() {
   cleanup_stale_pid
-  if is_running; then
+  if is_persistent_running; then
     printf 'on\n'
     return 0
   fi
@@ -67,14 +75,14 @@ start_blocker() {
   setsid systemd-inhibit \
     --what="$what" \
     --mode=block \
-    --who="$who" \
+    --who="$who_persistent" \
     --why="$why" \
     sleep infinity >/dev/null 2>&1 9>&- &
 
   printf '%s\n' "$!" >"$pid_file"
   sleep 0.2
 
-  if ! is_running; then
+  if ! is_persistent_running; then
     rm -f "$pid_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
@@ -87,17 +95,17 @@ stop_blocker() {
   local pid
   pid="$(read_pid 2>/dev/null || true)"
 
-  if [[ -n "$pid" ]] && is_running; then
+  if [[ -n "$pid" ]] && is_persistent_running; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 
     for _ in {1..20}; do
-      if ! is_running; then
+      if ! is_persistent_running; then
         break
       fi
       sleep 0.1
     done
 
-    if is_running; then
+    if is_persistent_running; then
       kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
     fi
   fi
@@ -108,8 +116,10 @@ stop_blocker() {
 
 status() {
   cleanup_stale_pid
-  if is_running; then
+  if is_persistent_running; then
     printf 'on\n'
+  elif is_temporary_running; then
+    printf 'running\n'
   else
     printf 'off\n'
   fi
@@ -117,7 +127,7 @@ status() {
 
 run_shell() {
   printf 'nosleep active: lid-close suspend and idle sleep are blocked. Type "exit" to release.\n' >&2
-  exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "${SHELL:-/bin/bash}"
+  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" "${SHELL:-/bin/bash}"
 }
 
 run_command() {
@@ -126,7 +136,7 @@ run_command() {
     exit 2
   fi
 
-  exec systemd-inhibit --what="$what" --mode=block --who="$who" --why="$why" "$@"
+  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" "$@"
 }
 
 command="${1:-}"
@@ -157,7 +167,7 @@ case "$command" in
   toggle)
     exec 9>"$lock_file"
     flock -x 9
-    if is_running; then
+    if is_persistent_running; then
       stop_blocker
     else
       start_blocker

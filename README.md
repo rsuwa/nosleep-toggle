@@ -27,10 +27,15 @@ If GNOME Shell does not detect the new extension immediately, log out and log ba
 
 ## Usage
 
-Click the `OFF` / `ON` indicator in the top bar.
+Click the status indicator in the top bar.
 
-- `ON`: blocks lid-close suspend, normal sleep, and idle sleep
-- `OFF`: restores normal sleep behavior
+- `Sleep`: sleep is allowed
+- `Awake`: sleep is blocked until NoSleep is turned off
+- `Run`: sleep is blocked while a command is running through `nosleep`
+
+Clicking `Sleep` turns NoSleep on.
+Clicking `Awake` turns NoSleep off.
+Clicking `Run` keeps the running command untouched and promotes NoSleep to `Awake`.
 
 CLI usage:
 
@@ -40,6 +45,8 @@ nosleep off
 nosleep toggle
 nosleep status
 ```
+
+`nosleep status` prints `off`, `on`, or `running`.
 
 Use the same `nosleep` command to inhibit sleep only while a command runs:
 

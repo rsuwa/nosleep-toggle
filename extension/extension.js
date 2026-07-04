@@ -11,6 +11,33 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const UUID = 'nosleep-toggle@systemd-inhibit.local';
 
+const STATES = {
+    off: {
+        icon: 'nosleep-off-symbolic.svg',
+        label: 'Sleep',
+        status: 'NoSleep: Sleep allowed',
+        toggle: 'Turn On',
+        accessible: 'NoSleep Toggle Off',
+        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16);',
+    },
+    on: {
+        icon: 'nosleep-on-symbolic.svg',
+        label: 'Awake',
+        status: 'NoSleep: Always awake',
+        toggle: 'Turn Off',
+        accessible: 'NoSleep Toggle On',
+        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(46, 194, 126, 0.22); border: 1px solid rgba(46, 194, 126, 0.48);',
+    },
+    running: {
+        icon: 'nosleep-running-symbolic.svg',
+        label: 'Run',
+        status: 'NoSleep: Active for command',
+        toggle: 'Keep On',
+        accessible: 'NoSleep Toggle Running',
+        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(245, 169, 71, 0.22); border: 1px solid rgba(245, 169, 71, 0.52);',
+    },
+};
+
 const NoSleepIndicator = GObject.registerClass(
 class NoSleepIndicator extends PanelMenu.Button {
     _init(extensionDir) {
@@ -18,7 +45,7 @@ class NoSleepIndicator extends PanelMenu.Button {
 
         this._extensionDir = extensionDir;
         this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleep']);
-        this._enabled = false;
+        this._state = 'off';
         this._refreshSourceId = 0;
 
         this._buildPanelButton();
@@ -38,17 +65,18 @@ class NoSleepIndicator extends PanelMenu.Button {
     _buildPanelButton() {
         this._box = new St.BoxLayout({
             style_class: 'panel-status-menu-box',
+            style: STATES.off.style,
         });
 
         this._icon = new St.Icon({
-            gicon: this._iconForState(false),
+            gicon: this._iconForState('off'),
             style_class: 'system-status-icon',
         });
 
         this._label = new St.Label({
-            text: 'OFF',
+            text: STATES.off.label,
             y_align: Clutter.ActorAlign.CENTER,
-            style: 'padding-left: 4px;',
+            style: 'font-size: 11px; font-weight: 700;',
         });
 
         this._box.add_child(this._icon);
@@ -57,11 +85,11 @@ class NoSleepIndicator extends PanelMenu.Button {
     }
 
     _buildMenu() {
-        this._statusItem = new PopupMenu.PopupMenuItem('NoSleep: OFF');
+        this._statusItem = new PopupMenu.PopupMenuItem(STATES.off.status);
         this._statusItem.setSensitive(false);
         this.menu.addMenuItem(this._statusItem);
 
-        this._toggleItem = new PopupMenu.PopupMenuItem('Turn On');
+        this._toggleItem = new PopupMenu.PopupMenuItem(STATES.off.toggle);
         this._toggleItem.connect('activate', () => this._toggle());
         this.menu.addMenuItem(this._toggleItem);
 
@@ -72,8 +100,8 @@ class NoSleepIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(refreshItem);
     }
 
-    _iconForState(enabled) {
-        const iconName = enabled ? 'nosleep-on-symbolic.svg' : 'nosleep-off-symbolic.svg';
+    _iconForState(state) {
+        const iconName = STATES[state]?.icon ?? STATES.off.icon;
         const path = this._extensionDir.get_child('icons').get_child(iconName).get_path();
         return new Gio.FileIcon({file: Gio.File.new_for_path(path)});
     }
@@ -101,30 +129,31 @@ class NoSleepIndicator extends PanelMenu.Button {
 
     _refresh() {
         const state = this._runCtl(['status']);
-        if (state === 'on')
-            this._setState(true);
-        else if (state === 'off')
-            this._setState(false);
+        if (state && STATES[state])
+            this._setState(state);
     }
 
     _toggle() {
-        const state = this._runCtl(['toggle']);
+        const command = this._state === 'on' ? 'off' : 'on';
+        const state = this._runCtl([command]);
         if (state === 'on') {
-            this._setState(true);
-            Main.notify('NoSleep', 'Lid-close suspend is blocked.');
+            this._setState('on');
+            Main.notify('NoSleep', 'Sleep is blocked until you turn NoSleep off.');
         } else if (state === 'off') {
-            this._setState(false);
-            Main.notify('NoSleep', 'Lid-close suspend is back to normal.');
+            this._setState('off');
+            Main.notify('NoSleep', 'Sleep behavior is back to normal.');
         }
     }
 
-    _setState(enabled) {
-        this._enabled = enabled;
-        this._icon.gicon = this._iconForState(enabled);
-        this._label.text = enabled ? 'ON' : 'OFF';
-        this._statusItem.label.text = enabled ? 'NoSleep: ON' : 'NoSleep: OFF';
-        this._toggleItem.label.text = enabled ? 'Turn Off' : 'Turn On';
-        this.set_accessible_name(enabled ? 'NoSleep Toggle On' : 'NoSleep Toggle Off');
+    _setState(state) {
+        const stateInfo = STATES[state] ?? STATES.off;
+        this._state = state;
+        this._box.set_style(stateInfo.style);
+        this._icon.gicon = this._iconForState(state);
+        this._label.text = stateInfo.label;
+        this._statusItem.label.text = stateInfo.status;
+        this._toggleItem.label.text = stateInfo.toggle;
+        this.set_accessible_name(stateInfo.accessible);
     }
 
     vfunc_button_press_event(event) {
