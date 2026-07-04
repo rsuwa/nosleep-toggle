@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-runtime_base="${XDG_RUNTIME_DIR:-/tmp}"
-state_dir="$runtime_base/nosleep"
+if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+  state_dir="$XDG_RUNTIME_DIR/nosleep"
+else
+  state_dir="/tmp/nosleep-$(id -u)"
+fi
+
 pid_file="$state_dir/inhibit.pid"
 lock_file="$state_dir/lock"
 
@@ -12,7 +16,23 @@ who_running="nosleep:running"
 who_legacy="nosleep"
 why="keep CLI agents running while lid is closed"
 
-mkdir -p "$state_dir"
+prepare_state_dir() {
+  if [[ -L "$state_dir" ]]; then
+    printf 'refusing symlink state directory: %s\n' "$state_dir" >&2
+    exit 1
+  fi
+
+  mkdir -p "$state_dir"
+
+  if [[ ! -d "$state_dir" || ! -O "$state_dir" ]]; then
+    printf 'unsafe state directory: %s\n' "$state_dir" >&2
+    exit 1
+  fi
+
+  chmod 700 "$state_dir"
+}
+
+prepare_state_dir
 
 usage() {
   cat <<'EOF'
