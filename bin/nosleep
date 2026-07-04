@@ -27,9 +27,9 @@ Examples:
   nosleep on
   nosleep off
   nosleep status
-  nosleep codex
-  nosleep claude
-  nosleep run bash -lc 'codex'
+  nosleep long-command --option
+  nosleep run long-command --option
+  nosleep run bash -lc 'long-command --option'
 EOF
 }
 
