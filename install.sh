@@ -6,6 +6,26 @@ bin_dir="$HOME/.local/bin"
 extension_root="$HOME/.local/share/gnome-shell/extensions"
 extension_uuid="nosleep-toggle@systemd-inhibit.local"
 
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  printf 'Do not run install.sh as root. Run it as your desktop user.\n' >&2
+  exit 1
+fi
+
+for command in systemd-inhibit flock setsid; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "$command" >&2
+    exit 1
+  fi
+done
+
+backup_path() {
+  local link="$1"
+  local backup="${link}.bak.$(date +%Y%m%d%H%M%S)"
+
+  mv "$link" "$backup"
+  printf 'Backed up %s to %s\n' "$link" "$backup"
+}
+
 link_path() {
   local target="$1"
   local link="$2"
@@ -16,11 +36,9 @@ link_path() {
     if [[ "$(readlink "$link")" == "$target" ]]; then
       return 0
     fi
-    rm "$link"
+    backup_path "$link"
   elif [[ -e "$link" ]]; then
-    local backup="${link}.bak.$(date +%Y%m%d%H%M%S)"
-    mv "$link" "$backup"
-    printf 'Backed up %s to %s\n' "$link" "$backup"
+    backup_path "$link"
   fi
 
   ln -s "$target" "$link"
@@ -33,7 +51,13 @@ link_path "$repo_root/bin/nosleep" "$bin_dir/nosleep"
 link_path "$repo_root/extension" "$extension_root/$extension_uuid"
 
 if command -v gnome-extensions >/dev/null 2>&1; then
-  gnome-extensions enable "$extension_uuid" >/dev/null 2>&1 || true
+  if ! enable_output="$(gnome-extensions enable "$extension_uuid" 2>&1)"; then
+    printf 'Warning: could not enable GNOME extension %s.\n' "$extension_uuid" >&2
+    if [[ -n "$enable_output" ]]; then
+      printf '%s\n' "$enable_output" >&2
+    fi
+    printf 'Try: gnome-extensions enable %s\n' "$extension_uuid" >&2
+  fi
 fi
 
 printf 'Installed nosleep-toggle from %s\n' "$repo_root"
