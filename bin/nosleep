@@ -202,7 +202,39 @@ cleanup_stale_pid() {
   fi
 }
 
+write_state_value() {
+  local path="$1"
+  local value="$2"
+  local tmp
+
+  tmp="$(mktemp "${path}.tmp.XXXXXX")" || return 1
+  if ! printf '%s\n' "$value" >"$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  mv -f "$tmp" "$path"
+}
+
+stop_started_blocker() {
+  local pid="$1"
+
+  [[ -n "$pid" ]] || return 0
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+}
+
 start_blocker() {
+  local pid start_time cleanup_new_blocker
+
   cleanup_stale_pid
   if is_persistent_running; then
     printf 'on\n'
@@ -216,18 +248,30 @@ start_blocker() {
     --why="$why" \
     sleep infinity >/dev/null 2>&1 9>&- &
 
-  local pid start_time
   pid="$!"
-  printf '%s\n' "$pid" >"$pid_file"
-  if start_time="$(process_start_time "$pid" 2>/dev/null)"; then
-    printf '%s\n' "$start_time" >"$start_file"
-  fi
+  cleanup_new_blocker=1
+  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; rm -f "$pid_file" "$start_file" "$pid_file".tmp.* "$start_file".tmp.*; fi' RETURN
+
+  start_time="$(process_start_time "$pid")" || {
+    printf 'failed to inspect systemd-inhibit process\n' >&2
+    return 1
+  }
+  write_state_value "$pid_file" "$pid" || {
+    printf 'failed to write state file: %s\n' "$pid_file" >&2
+    return 1
+  }
+  write_state_value "$start_file" "$start_time" || {
+    printf 'failed to write state file: %s\n' "$start_file" >&2
+    return 1
+  }
   if ! is_persistent_running || ! wait_for_persistent_inhibitor "$pid"; then
     rm -f "$pid_file" "$start_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
   fi
 
+  cleanup_new_blocker=0
+  trap - RETURN
   printf 'on\n'
 }
 
