@@ -324,6 +324,11 @@ stop_blocker() {
     fi
   fi
 
+  if find_persistent_inhibitor_pid >/dev/null; then
+    printf 'failed to stop persistent systemd-inhibit\n' >&2
+    return 1
+  fi
+
   rm -f "$pid_file" "$start_file"
   status
 }
