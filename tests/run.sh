@@ -108,6 +108,19 @@ FAKE_INHIBIT
   assert_eq keep "$(<"$marker")" 'lock symlink target is not truncated'
 }
 
+test_state_dir_symlink() {
+  local runtime_dir target_dir
+
+  runtime_dir="$(make_tmp_dir)"
+  target_dir="$(make_tmp_dir)"
+  ln -s "$target_dir" "$runtime_dir/nosleep"
+
+  if XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status >/dev/null 2>&1; then
+    printf 'FAIL: status accepted a symlink state directory\n' >&2
+    exit 1
+  fi
+}
+
 test_cli_state() {
   local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit runtime_dir
   local duplicate_pid_one duplicate_pid_two spoof_pid spoof_who target_pid
@@ -425,6 +438,7 @@ test_syntax
 test_status_list_failure
 test_path_poisoning
 test_lock_symlink
+test_state_dir_symlink
 test_cli_state
 test_extension_metadata
 test_install_uninstall

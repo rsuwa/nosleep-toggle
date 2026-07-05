@@ -53,14 +53,19 @@ why="keep CLI agents running while lid is closed"
 current_uid="$("$id_cmd" -u)"
 
 prepare_state_dir() {
-  if [[ -L "$state_dir" ]]; then
-    printf 'refusing symlink state directory: %s\n' "$state_dir" >&2
-    exit 1
+  if [[ -e "$state_dir" ]]; then
+    if [[ -L "$state_dir" || ! -d "$state_dir" || ! -O "$state_dir" ]]; then
+      printf 'unsafe state directory: %s\n' "$state_dir" >&2
+      exit 1
+    fi
+  else
+    "$mkdir_cmd" -- "$state_dir" || {
+      printf 'failed to create state directory: %s\n' "$state_dir" >&2
+      exit 1
+    }
   fi
 
-  "$mkdir_cmd" -p -- "$state_dir"
-
-  if [[ ! -d "$state_dir" || ! -O "$state_dir" ]]; then
+  if [[ -L "$state_dir" || ! -d "$state_dir" || ! -O "$state_dir" ]]; then
     printf 'unsafe state directory: %s\n' "$state_dir" >&2
     exit 1
   fi
