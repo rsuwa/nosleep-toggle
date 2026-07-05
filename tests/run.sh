@@ -108,7 +108,7 @@ FAKE_INHIBIT
 
 test_cli_state() {
   local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit runtime_dir
-  local spoof_pid spoof_who target_pid
+  local duplicate_pid_one duplicate_pid_two spoof_pid spoof_who target_pid
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -262,6 +262,32 @@ FAKE_INHIBIT
     printf 'FAIL: off left recorded state files after list miss\n' >&2
     exit 1
   fi
+
+  runtime_dir="$(make_tmp_dir)"
+  systemd-inhibit \
+    --what=handle-lid-switch:sleep:idle \
+    --mode=block \
+    --who=nosleep:persistent \
+    --why=duplicate-nosleep-one \
+    -- sleep 20 &
+  duplicate_pid_one="$!"
+  run_pids+=("$duplicate_pid_one")
+  systemd-inhibit \
+    --what=handle-lid-switch:sleep:idle \
+    --mode=block \
+    --who=nosleep:persistent \
+    --why=duplicate-nosleep-two \
+    -- sleep 20 &
+  duplicate_pid_two="$!"
+  run_pids+=("$duplicate_pid_two")
+  sleep 0.3
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'off stops duplicate persistent inhibitors'
+  if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:persistent' >/dev/null; then
+    printf 'FAIL: off left duplicate persistent inhibitors\n' >&2
+    exit 1
+  fi
+  wait "$duplicate_pid_one" 2>/dev/null || true
+  wait "$duplicate_pid_two" 2>/dev/null || true
 
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"

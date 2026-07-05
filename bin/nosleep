@@ -254,12 +254,13 @@ list_inhibitors() {
   "$systemd_inhibit_cmd" --list --no-pager --no-legend
 }
 
-inhibitor_pid_from_list() {
+inhibitor_pids_from_list() {
   local inhibitors="$1"
   local expected_who="$2"
   local allow_legacy="${3:-0}"
   local expected_pid="${4:-}"
   local line inhibitor_who inhibitor_uid inhibitor_pid inhibitor_comm inhibitor_what inhibitor_mode
+  local found=1
 
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
@@ -281,14 +282,29 @@ inhibitor_pid_from_list() {
     process_matches_inhibitor_invocation "$inhibitor_pid" "$expected_who" "$allow_legacy" || continue
 
     printf '%s\n' "$inhibitor_pid"
-    return 0
+    found=0
   done <<<"$inhibitors"
+
+  return "$found"
+}
+
+inhibitor_pid_from_list() {
+  local pid
+
+  while IFS= read -r pid; do
+    printf '%s\n' "$pid"
+    return 0
+  done < <(inhibitor_pids_from_list "$@")
 
   return 1
 }
 
 persistent_inhibitor_pid_from_list() {
   inhibitor_pid_from_list "$1" "$who_persistent" 1 "${2:-}"
+}
+
+persistent_inhibitor_pids_from_list() {
+  inhibitor_pids_from_list "$1" "$who_persistent" 1 "${2:-}"
 }
 
 temporary_inhibitor_pid_from_list() {
@@ -300,6 +316,12 @@ find_persistent_inhibitor_pid() {
   local inhibitors
   inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
   persistent_inhibitor_pid_from_list "$inhibitors" "$expected_pid"
+}
+
+find_persistent_inhibitor_pids() {
+  local inhibitors
+  inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
+  persistent_inhibitor_pids_from_list "$inhibitors"
 }
 
 wait_for_persistent_inhibitor() {
@@ -451,7 +473,7 @@ start_blocker() {
 }
 
 stop_blocker() {
-  local pid
+  local pid pids
   pid="$(read_pid 2>/dev/null || true)"
 
   if [[ -n "$pid" ]] && process_has_recorded_identity "$pid"; then
@@ -468,10 +490,12 @@ stop_blocker() {
       kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
     fi
   else
-    pid="$(find_persistent_inhibitor_pid || true)"
+    mapfile -t pids < <(find_persistent_inhibitor_pids || true)
 
-    if [[ -n "$pid" ]]; then
-      kill -TERM "$pid" 2>/dev/null || true
+    if [[ "${#pids[@]}" -gt 0 ]]; then
+      for pid in "${pids[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+      done
 
       for _ in {1..20}; do
         if ! find_persistent_inhibitor_pid >/dev/null; then
@@ -481,7 +505,9 @@ stop_blocker() {
       done
 
       if find_persistent_inhibitor_pid >/dev/null; then
-        kill -KILL "$pid" 2>/dev/null || true
+        for pid in "${pids[@]}"; do
+          kill -KILL "$pid" 2>/dev/null || true
+        done
       fi
     fi
   fi
