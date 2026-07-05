@@ -22,6 +22,14 @@ const SIGKILL = 9;
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 
 const STATES = {
+    loading: {
+        icon: 'nosleep-off-symbolic.svg',
+        label: '...',
+        status: 'NoSleep: Checking status',
+        toggle: 'Checking',
+        accessible: 'NoSleep Toggle Checking',
+        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16);',
+    },
     off: {
         icon: 'nosleep-off-symbolic.svg',
         label: 'Sleep',
@@ -63,7 +71,8 @@ class NoSleepIndicator extends PanelMenu.Button {
 
         this._extensionDir = extensionDir;
         this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleep']);
-        this._state = 'off';
+        this._state = 'loading';
+        this._statusLoaded = false;
         this._refreshSourceId = 0;
         this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
         this._refreshInFlight = false;
@@ -81,16 +90,16 @@ class NoSleepIndicator extends PanelMenu.Button {
     _buildPanelButton() {
         this._box = new St.BoxLayout({
             style_class: 'panel-status-menu-box',
-            style: STATES.off.style,
+            style: STATES.loading.style,
         });
 
         this._icon = new St.Icon({
-            gicon: this._iconForState('off'),
+            gicon: this._iconForState('loading'),
             style_class: 'system-status-icon',
         });
 
         this._label = new St.Label({
-            text: STATES.off.label,
+            text: STATES.loading.label,
             y_align: Clutter.ActorAlign.CENTER,
             style: 'font-size: 11px; font-weight: 700;',
         });
@@ -101,11 +110,12 @@ class NoSleepIndicator extends PanelMenu.Button {
     }
 
     _buildMenu() {
-        this._statusItem = new PopupMenu.PopupMenuItem(STATES.off.status);
+        this._statusItem = new PopupMenu.PopupMenuItem(STATES.loading.status);
         this._statusItem.setSensitive(false);
         this.menu.addMenuItem(this._statusItem);
 
-        this._toggleItem = new PopupMenu.PopupMenuItem(STATES.off.toggle);
+        this._toggleItem = new PopupMenu.PopupMenuItem(STATES.loading.toggle);
+        this._toggleItem.setSensitive(false);
         this._toggleItem.connect('activate', () => this._toggle());
         this.menu.addMenuItem(this._toggleItem);
 
@@ -251,9 +261,11 @@ class NoSleepIndicator extends PanelMenu.Button {
 
             if (!this._destroyed && state && STATES[state]) {
                 this._setState(state);
+                this._statusLoaded = true;
                 this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
             } else if (!this._destroyed) {
                 this._setState('unknown');
+                this._statusLoaded = true;
                 this._refreshIntervalSeconds = Math.min(this._refreshIntervalSeconds * 2, MAX_REFRESH_INTERVAL_SECONDS);
             }
         } finally {
@@ -268,6 +280,11 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._actionInFlight = true;
         this._stateGeneration++;
         try {
+            if (!this._statusLoaded) {
+                await this._refresh({notify: true, force: true});
+                return;
+            }
+
             if (this._state === 'unknown') {
                 await this._refresh({notify: true, force: true});
                 return;
@@ -303,6 +320,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._label.text = stateInfo.label;
         this._statusItem.label.text = stateInfo.status;
         this._toggleItem.label.text = stateInfo.toggle;
+        this._toggleItem.setSensitive(state !== 'loading');
         this.set_accessible_name(stateInfo.accessible);
     }
 

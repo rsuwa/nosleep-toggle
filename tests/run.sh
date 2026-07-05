@@ -380,6 +380,14 @@ test_extension_metadata() {
     printf 'FAIL: extension does not guard stale refresh results\n' >&2
     exit 1
   }
+  grep -F 'loading:' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not have an initial loading state\n' >&2
+    exit 1
+  }
+  grep -F '_statusLoaded' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not guard toggles before initial status\n' >&2
+    exit 1
+  }
 }
 
 test_install_uninstall() {
