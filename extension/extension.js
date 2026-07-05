@@ -21,6 +21,17 @@ const SIGKILL = 9;
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 
+function panelStyle(backgroundColor, borderColor) {
+    return [
+        'spacing: 5px',
+        'padding: 0 7px',
+        'margin: 2px 0',
+        'border-radius: 999px',
+        `background-color: ${backgroundColor}`,
+        `border: 1px solid ${borderColor}`,
+    ].join('; ') + ';';
+}
+
 const STATES = {
     loading: {
         icon: 'nosleep-off-symbolic.svg',
@@ -28,7 +39,7 @@ const STATES = {
         status: 'NoSleep: Checking status',
         toggle: 'Checking',
         accessible: 'NoSleep Toggle Checking',
-        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16);',
+        style: panelStyle('rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.16)'),
     },
     off: {
         icon: 'nosleep-off-symbolic.svg',
@@ -36,7 +47,7 @@ const STATES = {
         status: 'NoSleep: Sleep allowed',
         toggle: 'Turn On',
         accessible: 'NoSleep Toggle Off',
-        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16);',
+        style: panelStyle('rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.16)'),
     },
     on: {
         icon: 'nosleep-on-symbolic.svg',
@@ -44,7 +55,7 @@ const STATES = {
         status: 'NoSleep: Always awake',
         toggle: 'Turn Off',
         accessible: 'NoSleep Toggle On',
-        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(46, 194, 126, 0.22); border: 1px solid rgba(46, 194, 126, 0.48);',
+        style: panelStyle('rgba(46, 194, 126, 0.22)', 'rgba(46, 194, 126, 0.48)'),
     },
     running: {
         icon: 'nosleep-running-symbolic.svg',
@@ -52,7 +63,7 @@ const STATES = {
         status: 'NoSleep: Active for command',
         toggle: 'Keep On',
         accessible: 'NoSleep Toggle Running',
-        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(245, 169, 71, 0.22); border: 1px solid rgba(245, 169, 71, 0.52);',
+        style: panelStyle('rgba(245, 169, 71, 0.22)', 'rgba(245, 169, 71, 0.52)'),
     },
     unknown: {
         icon: 'nosleep-off-symbolic.svg',
@@ -60,7 +71,7 @@ const STATES = {
         status: 'NoSleep: Status unknown',
         toggle: 'Retry',
         accessible: 'NoSleep Toggle Unknown',
-        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(226, 82, 82, 0.22); border: 1px solid rgba(226, 82, 82, 0.52);',
+        style: panelStyle('rgba(226, 82, 82, 0.22)', 'rgba(226, 82, 82, 0.52)'),
     },
 };
 
