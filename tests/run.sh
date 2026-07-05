@@ -62,7 +62,7 @@ test_status_list_failure() {
 }
 
 test_cli_state() {
-  local runtime_dir pid spoof_pid
+  local fake_bin runtime_dir pid spoof_pid
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -100,6 +100,12 @@ test_cli_state() {
   sleep 0.3
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on while command runs'
   assert_eq running "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'turn off while command runs'
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  printf '#!/usr/bin/env bash\nprintf "dash-command-ran\\n"\n' >"$fake_bin/-dashcmd"
+  chmod +x "$fake_bin/-dashcmd"
+  assert_eq dash-command-ran "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" run -dashcmd)" 'dash-prefixed command'
 }
 
 test_install_uninstall() {

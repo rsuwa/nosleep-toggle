@@ -246,6 +246,7 @@ start_blocker() {
     --mode=block \
     --who="$who_persistent" \
     --why="$why" \
+    -- \
     sleep infinity >/dev/null 2>&1 9>&- &
 
   pid="$!"
@@ -361,7 +362,7 @@ status() {
 
 run_shell() {
   printf 'nosleep active: lid-close suspend and idle sleep are blocked. Type "exit" to release.\n' >&2
-  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" "${SHELL:-/bin/bash}"
+  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" -- "${SHELL:-/bin/bash}"
 }
 
 run_command() {
@@ -370,7 +371,7 @@ run_command() {
     exit 2
   fi
 
-  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" "$@"
+  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" -- "$@"
 }
 
 command="${1:-}"
