@@ -91,6 +91,7 @@ It skips the CLI state test if another `nosleep` inhibitor is already active.
 Running a laptop while it is inside a bag can generate heat.
 Use this for short moves, not long unattended runs.
 
-NoSleep does not block shutdown, hibernate, critical battery actions, thermal shutdown, administrator policy, crashes, logout, or system updates.
+NoSleep requests logind inhibitors for the lid switch, sleep/hibernate, and idle sleep.
+It does not block shutdown, critical battery actions, thermal shutdown, administrator policy, crashes, logout, or system updates.
 Disabling the GNOME extension removes the top-bar control, but it does not guarantee that an already active persistent inhibitor is stopped.
 Run `nosleep off` before disabling the extension if NoSleep is active.
