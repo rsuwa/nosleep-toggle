@@ -1,10 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+user_path="$PATH"
+trusted_path="${NOSLEEP_TRUSTED_PATH:-/usr/sbin:/usr/bin:/sbin:/bin}"
+
+resolve_required_command() {
+  local command_name="$1"
+  local command_path
+
+  command_path="$(PATH="$trusted_path" command -v "$command_name")" || {
+    printf 'Missing required command: %s\n' "$command_name" >&2
+    exit 1
+  }
+
+  case "$command_path" in
+    /*)
+      printf '%s\n' "$command_path"
+      ;;
+    *)
+      printf 'Missing required command: %s\n' "$command_name" >&2
+      exit 1
+      ;;
+  esac
+}
+
+id_cmd="$(resolve_required_command id)"
+systemd_inhibit_cmd="$(resolve_required_command systemd-inhibit)"
+setsid_cmd="$(resolve_required_command setsid)"
+flock_cmd="$(resolve_required_command flock)"
+grep_cmd="$(resolve_required_command grep)"
+tr_cmd="$(resolve_required_command tr)"
+mktemp_cmd="$(resolve_required_command mktemp)"
+mv_cmd="$(resolve_required_command mv)"
+rm_cmd="$(resolve_required_command rm)"
+sleep_cmd="$(resolve_required_command sleep)"
+
 if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
   state_dir="$XDG_RUNTIME_DIR/nosleep"
 else
-  state_dir="/tmp/nosleep-$(id -u)"
+  state_dir="/tmp/nosleep-$("$id_cmd" -u)"
 fi
 
 pid_file="$state_dir/inhibit.pid"
@@ -17,7 +51,7 @@ who_persistent="nosleep:persistent"
 who_running="nosleep:running"
 who_legacy="nosleep"
 why="keep CLI agents running while lid is closed"
-current_uid="$(id -u)"
+current_uid="$("$id_cmd" -u)"
 
 prepare_state_dir() {
   if [[ -L "$state_dir" ]]; then
@@ -80,11 +114,11 @@ process_matches_persistent() {
   local argv
 
   [[ -r "/proc/$pid/cmdline" ]] || return 1
-  argv="$(tr '\0' '\n' 2>/dev/null <"/proc/$pid/cmdline")" || return 1
+  argv="$("$tr_cmd" '\0' '\n' 2>/dev/null <"/proc/$pid/cmdline")" || return 1
 
-  grep -E '(^|/)systemd-inhibit$' <<<"$argv" >/dev/null || return 1
-  grep -Fx -- "--who=$who_persistent" <<<"$argv" >/dev/null \
-    || grep -Fx -- "--who=$who_legacy" <<<"$argv" >/dev/null
+  "$grep_cmd" -E '(^|/)systemd-inhibit$' <<<"$argv" >/dev/null || return 1
+  "$grep_cmd" -Fx -- "--who=$who_persistent" <<<"$argv" >/dev/null \
+    || "$grep_cmd" -Fx -- "--who=$who_legacy" <<<"$argv" >/dev/null
 }
 
 process_start_time() {
@@ -145,7 +179,7 @@ is_temporary_running() {
 }
 
 list_inhibitors() {
-  systemd-inhibit --list --no-pager --no-legend
+  "$systemd_inhibit_cmd" --list --no-pager --no-legend
 }
 
 inhibitor_pid_from_list() {
@@ -202,7 +236,7 @@ wait_for_persistent_inhibitor() {
     if find_persistent_inhibitor_pid "$pid" >/dev/null; then
       return 0
     fi
-    sleep 0.1
+    "$sleep_cmd" 0.1
   done
 
   return 1
@@ -220,7 +254,7 @@ inhibitors_include_temporary() {
 
 cleanup_stale_pid() {
   if ! is_persistent_running; then
-    rm -f "$pid_file" "$start_file" "$boot_file"
+    "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file"
   fi
 }
 
@@ -229,13 +263,13 @@ write_state_value() {
   local value="$2"
   local tmp
 
-  tmp="$(mktemp "${path}.tmp.XXXXXX")" || return 1
+  tmp="$("$mktemp_cmd" "${path}.tmp.XXXXXX")" || return 1
   if ! printf '%s\n' "$value" >"$tmp"; then
-    rm -f "$tmp"
+    "$rm_cmd" -f "$tmp"
     return 1
   fi
 
-  mv -f "$tmp" "$path"
+  "$mv_cmd" -f "$tmp" "$path"
 }
 
 stop_started_blocker() {
@@ -248,7 +282,7 @@ stop_started_blocker() {
     if ! kill -0 "$pid" 2>/dev/null; then
       return 0
     fi
-    sleep 0.1
+    "$sleep_cmd" 0.1
   done
 
   kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
@@ -263,17 +297,17 @@ start_blocker() {
     return 0
   fi
 
-  setsid systemd-inhibit \
+  "$setsid_cmd" "$systemd_inhibit_cmd" \
     --what="$what" \
     --mode=block \
     --who="$who_persistent" \
     --why="$why" \
     -- \
-    sleep infinity >/dev/null 2>&1 9>&- &
+    "$sleep_cmd" infinity >/dev/null 2>&1 9>&- &
 
   pid="$!"
   cleanup_new_blocker=1
-  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; rm -f "$pid_file" "$start_file" "$boot_file" "$pid_file".tmp.* "$start_file".tmp.* "$boot_file".tmp.*; fi' RETURN
+  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file" "$pid_file".tmp.* "$start_file".tmp.* "$boot_file".tmp.*; fi' RETURN
 
   start_time="$(process_start_time "$pid")" || {
     printf 'failed to inspect systemd-inhibit process\n' >&2
@@ -296,7 +330,7 @@ start_blocker() {
     return 1
   }
   if ! is_persistent_running || ! wait_for_persistent_inhibitor "$pid"; then
-    rm -f "$pid_file" "$start_file" "$boot_file"
+    "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
   fi
@@ -326,7 +360,7 @@ stop_blocker() {
       if ! is_persistent_running; then
         break
       fi
-      sleep 0.1
+      "$sleep_cmd" 0.1
     done
 
     if is_persistent_running; then
@@ -346,7 +380,7 @@ stop_blocker() {
         if ! find_persistent_inhibitor_pid >/dev/null; then
           break
         fi
-        sleep 0.1
+        "$sleep_cmd" 0.1
       done
 
       if find_persistent_inhibitor_pid >/dev/null; then
@@ -360,7 +394,7 @@ stop_blocker() {
     return 1
   fi
 
-  rm -f "$pid_file" "$start_file" "$boot_file"
+  "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file"
   status
 }
 
@@ -392,7 +426,7 @@ status() {
 
 run_shell() {
   printf 'nosleep active: lid-close suspend and idle sleep are blocked. Type "exit" to release.\n' >&2
-  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" -- "${SHELL:-/bin/bash}"
+  PATH="$user_path" exec "$systemd_inhibit_cmd" --what="$what" --mode=block --who="$who_running" --why="$why" -- "${SHELL:-/bin/bash}"
 }
 
 run_command() {
@@ -401,7 +435,7 @@ run_command() {
     exit 2
   fi
 
-  exec systemd-inhibit --what="$what" --mode=block --who="$who_running" --why="$why" -- "$@"
+  PATH="$user_path" exec "$systemd_inhibit_cmd" --what="$what" --mode=block --who="$who_running" --why="$why" -- "$@"
 }
 
 command="${1:-}"
@@ -411,7 +445,7 @@ case "$command" in
     usage
     ;;
   --status)
-    exec systemd-inhibit --list --no-pager
+    exec "$systemd_inhibit_cmd" --list --no-pager
     ;;
   "")
     run_shell
@@ -421,17 +455,17 @@ case "$command" in
     ;;
   on)
     exec 9>"$lock_file"
-    flock -x 9
+    "$flock_cmd" -x 9
     start_blocker
     ;;
   off)
     exec 9>"$lock_file"
-    flock -x 9
+    "$flock_cmd" -x 9
     stop_blocker
     ;;
   toggle)
     exec 9>"$lock_file"
-    flock -x 9
+    "$flock_cmd" -x 9
     if is_persistent_running; then
       stop_blocker
     else
@@ -440,7 +474,7 @@ case "$command" in
     ;;
   status)
     exec 9>"$lock_file"
-    flock -x 9
+    "$flock_cmd" -x 9
     status
     ;;
   run)

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bin_dir="$HOME/.local/bin"
 extension_root="$HOME/.local/share/gnome-shell/extensions"

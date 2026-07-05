@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 extension_uuid="nosleep-toggle@systemd-inhibit.local"
 installed_cli="$HOME/.local/bin/nosleep"

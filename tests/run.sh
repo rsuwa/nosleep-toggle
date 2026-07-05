@@ -55,7 +55,7 @@ test_status_list_failure() {
   printf '#!/usr/bin/env bash\nexit 77\n' >"$fake_bin/systemd-inhibit"
   chmod +x "$fake_bin/systemd-inhibit"
 
-  if PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status >/dev/null 2>&1; then
+  if NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status >/dev/null 2>&1; then
     printf 'FAIL: status succeeded when systemd-inhibit --list failed\n' >&2
     exit 1
   fi
