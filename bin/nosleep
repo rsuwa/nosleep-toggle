@@ -60,11 +60,11 @@ prepare_state_dir() {
       printf 'unsafe state directory: %s\n' "$state_dir" >&2
       exit 1
     fi
-  else
-    "$mkdir_cmd" -- "$state_dir" || {
+  elif ! "$mkdir_cmd" -m 700 -- "$state_dir"; then
+    if [[ -L "$state_dir" || ! -d "$state_dir" || ! -O "$state_dir" ]]; then
       printf 'failed to create state directory: %s\n' "$state_dir" >&2
       exit 1
-    }
+    fi
   fi
 
   if [[ -L "$state_dir" || ! -d "$state_dir" || ! -O "$state_dir" ]]; then

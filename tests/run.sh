@@ -143,6 +143,50 @@ test_state_dir_symlink() {
   fi
 }
 
+test_state_dir_concurrent_create() {
+  local fake_bin index pid real_mkdir runtime_dir
+  local -a pids
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  real_mkdir="$(command -v mkdir)"
+  cat >"$fake_bin/mkdir" <<FAKE_MKDIR
+#!/bin/bash
+sleep 0.2
+exec "$real_mkdir" "\$@"
+FAKE_MKDIR
+  cat >"$fake_bin/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/bin/bash
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$fake_bin/mkdir" "$fake_bin/systemd-inhibit"
+
+  pids=()
+  for index in {1..8}; do
+    (
+      NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        XDG_RUNTIME_DIR="$runtime_dir" \
+        "$repo_root/bin/nosleep" status >"$runtime_dir/status-$index" 2>"$runtime_dir/error-$index"
+    ) &
+    pids+=("$!")
+  done
+
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      printf 'FAIL: concurrent state directory creation failed\n' >&2
+      cat "$runtime_dir"/error-* >&2
+      exit 1
+    fi
+  done
+
+  for index in {1..8}; do
+    assert_eq off "$(<"$runtime_dir/status-$index")" 'concurrent state directory status'
+  done
+}
+
 test_cli_state() {
   local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit real_setsid runtime_dir
   local duplicate_pid_one duplicate_pid_two spoof_pid spoof_who target_pid
@@ -534,6 +578,7 @@ test_status_list_failure
 test_path_poisoning
 test_lock_symlink
 test_state_dir_symlink
+test_state_dir_concurrent_create
 test_cli_state
 test_extension_metadata
 test_install_uninstall
