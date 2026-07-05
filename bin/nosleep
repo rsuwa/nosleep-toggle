@@ -16,6 +16,7 @@ who_persistent="nosleep:persistent"
 who_running="nosleep:running"
 who_legacy="nosleep"
 why="keep CLI agents running while lid is closed"
+current_uid="$(id -u)"
 
 prepare_state_dir() {
   if [[ -L "$state_dir" ]]; then
@@ -125,6 +126,38 @@ list_inhibitors() {
   systemd-inhibit --list --no-pager --no-legend
 }
 
+persistent_inhibitor_pid_from_list() {
+  local inhibitors="$1"
+  local line inhibitor_who inhibitor_uid inhibitor_pid inhibitor_comm inhibitor_what inhibitor_mode
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+
+    read -r inhibitor_who inhibitor_uid _inhibitor_user inhibitor_pid inhibitor_comm inhibitor_what _ <<<"$line"
+    inhibitor_mode="${line##* }"
+
+    [[ "$inhibitor_who" == "$who_persistent" || "$inhibitor_who" == "$who_legacy" ]] || continue
+    [[ "$inhibitor_uid" == "$current_uid" ]] || continue
+    [[ "$inhibitor_pid" =~ ^[0-9]+$ ]] || continue
+    [[ "$inhibitor_comm" == "systemd-inhibit" ]] || continue
+    [[ "$inhibitor_mode" == "block" ]] || continue
+    [[ ":$inhibitor_what:" == *":handle-lid-switch:"* ]] || continue
+    [[ ":$inhibitor_what:" == *":sleep:"* ]] || continue
+    [[ ":$inhibitor_what:" == *":idle:"* ]] || continue
+
+    printf '%s\n' "$inhibitor_pid"
+    return 0
+  done <<<"$inhibitors"
+
+  return 1
+}
+
+find_persistent_inhibitor_pid() {
+  local inhibitors
+  inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
+  persistent_inhibitor_pid_from_list "$inhibitors"
+}
+
 inhibitors_include_persistent() {
   local inhibitors="$1"
   grep -F "$who_persistent" <<<"$inhibitors" >/dev/null \
@@ -200,6 +233,23 @@ stop_blocker() {
       if [[ "$kill_group" -eq 1 ]]; then
         kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
       else
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    fi
+  else
+    pid="$(find_persistent_inhibitor_pid || true)"
+
+    if [[ -n "$pid" ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+
+      for _ in {1..20}; do
+        if ! find_persistent_inhibitor_pid >/dev/null; then
+          break
+        fi
+        sleep 0.1
+      done
+
+      if find_persistent_inhibitor_pid >/dev/null; then
         kill -KILL "$pid" 2>/dev/null || true
       fi
     fi
