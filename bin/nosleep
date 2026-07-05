@@ -223,6 +223,27 @@ process_has_recorded_identity() {
   process_matches_recorded_boot
 }
 
+recorded_persistent_inhibitor_in_list() {
+  local inhibitors="$1"
+  local pid
+
+  pid="$(read_pid)" || return 1
+  process_matches_recorded_start "$pid" || return 1
+  process_matches_recorded_boot || return 1
+  persistent_inhibitor_pid_from_list "$inhibitors" "$pid" >/dev/null
+}
+
+recorded_persistent_active() {
+  local pid="$1"
+  local inhibitors
+
+  if inhibitors="$(list_inhibitors 2>/dev/null)"; then
+    persistent_inhibitor_pid_from_list "$inhibitors" "$pid" >/dev/null
+  else
+    is_persistent_running
+  fi
+}
+
 is_temporary_running() {
   local inhibitors
   inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
@@ -310,6 +331,26 @@ cleanup_stale_pid() {
   fi
 }
 
+cleanup_stale_pid_from_list() {
+  local inhibitors="$1"
+
+  read_pid >/dev/null 2>&1 || return 0
+  if ! recorded_persistent_inhibitor_in_list "$inhibitors"; then
+    "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file"
+  fi
+}
+
+persistent_active() {
+  local inhibitors
+
+  if inhibitors="$(list_inhibitors 2>/dev/null)"; then
+    cleanup_stale_pid_from_list "$inhibitors"
+    recorded_persistent_inhibitor_in_list "$inhibitors" || inhibitors_include_persistent "$inhibitors"
+  else
+    is_persistent_running
+  fi
+}
+
 write_state_value() {
   local path="$1"
   local value="$2"
@@ -344,7 +385,7 @@ start_blocker() {
   local pid start_time boot_id cleanup_new_blocker
 
   cleanup_stale_pid
-  if is_persistent_running || find_persistent_inhibitor_pid >/dev/null; then
+  if persistent_active; then
     printf 'on\n'
     return 0
   fi
@@ -396,20 +437,11 @@ start_blocker() {
 }
 
 stop_blocker() {
-  local pid kill_group
+  local pid
   pid="$(read_pid 2>/dev/null || true)"
-  kill_group=0
 
-  if [[ -n "$pid" ]] && is_persistent_running; then
-    if process_has_recorded_identity "$pid"; then
-      kill_group=1
-    fi
-
-    if [[ "$kill_group" -eq 1 ]]; then
-      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-    else
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
+  if [[ -n "$pid" ]] && process_has_recorded_identity "$pid" && recorded_persistent_active "$pid"; then
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 
     for _ in {1..20}; do
       if ! is_persistent_running; then
@@ -419,11 +451,7 @@ stop_blocker() {
     done
 
     if is_persistent_running; then
-      if [[ "$kill_group" -eq 1 ]]; then
-        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-      else
-        kill -KILL "$pid" 2>/dev/null || true
-      fi
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
     fi
   else
     pid="$(find_persistent_inhibitor_pid || true)"
@@ -468,7 +496,9 @@ status() {
     return 1
   fi
 
-  if is_persistent_running; then
+  cleanup_stale_pid_from_list "$inhibitors"
+
+  if recorded_persistent_inhibitor_in_list "$inhibitors"; then
     printf 'on\n'
   elif inhibitors_include_persistent "$inhibitors"; then
     printf 'on\n'
@@ -521,7 +551,7 @@ case "$command" in
   toggle)
     exec 9>"$lock_file"
     "$flock_cmd" -x 9
-    if is_persistent_running; then
+    if persistent_active; then
       stop_blocker
     else
       start_blocker

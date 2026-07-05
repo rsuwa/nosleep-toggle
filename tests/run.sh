@@ -73,7 +73,7 @@ test_path_poisoning() {
 }
 
 test_cli_state() {
-  local fake_bin runtime_dir pid spoof_pid target_pid spoof_who
+  local fake_bin runtime_dir pid spoof_pid target_pid spoof_who proc_stat fields
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -115,6 +115,41 @@ test_cli_state() {
   kill "$spoof_pid" "$target_pid" 2>/dev/null || true
   wait "$spoof_pid" 2>/dev/null || true
   wait "$target_pid" 2>/dev/null || true
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  cat >"$fake_bin/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$fake_bin/systemd-inhibit"
+  bash -c 'exec -a "$1" bash -c "trap \"exit\" TERM; while :; do sleep 1; done" nosleep-shim "${@:2}"' \
+    bash "$fake_bin/systemd-inhibit" \
+    --who=nosleep:persistent \
+    --what=handle-lid-switch:sleep:idle \
+    --mode=block &
+  pid="$!"
+  run_pids+=("$pid")
+  sleep 0.3
+  mkdir -p "$runtime_dir/nosleep"
+  printf '%s\n' "$pid" >"$runtime_dir/nosleep/inhibit.pid"
+  IFS= read -r proc_stat <"/proc/$pid/stat"
+  fields="${proc_stat##*) }"
+  # shellcheck disable=SC2086 # Split /proc stat fields into positional parameters.
+  set -- $fields
+  printf '%s\n' "${20}" >"$runtime_dir/nosleep/inhibit.start"
+  IFS= read -r fields </proc/sys/kernel/random/boot_id
+  printf '%s\n' "$fields" >"$runtime_dir/nosleep/inhibit.boot"
+  assert_eq off "$(
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      "$repo_root/bin/nosleep" status
+  )" 'status ignores recorded process without logind inhibitor'
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
 
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
