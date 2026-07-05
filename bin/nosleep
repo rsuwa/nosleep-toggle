@@ -410,7 +410,7 @@ case "$command" in
     ;;
   status)
     exec 9>"$lock_file"
-    flock -s 9
+    flock -x 9
     status
     ;;
   run)
