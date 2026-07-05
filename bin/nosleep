@@ -9,6 +9,7 @@ fi
 
 pid_file="$state_dir/inhibit.pid"
 start_file="$state_dir/inhibit.start"
+boot_file="$state_dir/inhibit.boot"
 lock_file="$state_dir/lock"
 
 what="handle-lid-switch:sleep:idle"
@@ -70,7 +71,8 @@ is_persistent_running() {
   local pid
   pid="$(read_pid)" || return 1
   process_matches_persistent "$pid" || return 1
-  process_matches_recorded_start "$pid"
+  process_matches_recorded_start "$pid" || return 1
+  process_matches_recorded_boot
 }
 
 process_matches_persistent() {
@@ -98,14 +100,33 @@ process_start_time() {
   printf '%s\n' "${20}"
 }
 
+current_boot_id() {
+  local boot_id
+
+  [[ -r /proc/sys/kernel/random/boot_id ]] || return 1
+  IFS= read -r boot_id </proc/sys/kernel/random/boot_id || return 1
+  [[ "$boot_id" =~ ^[0-9a-fA-F-]+$ ]] || return 1
+  printf '%s\n' "$boot_id"
+}
+
 process_matches_recorded_start() {
   local pid="$1"
   local recorded current
 
-  [[ -r "$start_file" ]] || return 0
+  [[ -r "$start_file" ]] || return 1
   recorded="$(<"$start_file")"
   [[ "$recorded" =~ ^[0-9]+$ ]] || return 1
   current="$(process_start_time "$pid")" || return 1
+  [[ "$recorded" == "$current" ]]
+}
+
+process_matches_recorded_boot() {
+  local recorded current
+
+  [[ -r "$boot_file" ]] || return 1
+  recorded="$(<"$boot_file")"
+  [[ "$recorded" =~ ^[0-9a-fA-F-]+$ ]] || return 1
+  current="$(current_boot_id)" || return 1
   [[ "$recorded" == "$current" ]]
 }
 
@@ -113,7 +134,8 @@ process_has_recorded_identity() {
   local pid="$1"
   [[ -r "$start_file" ]] || return 1
   process_matches_persistent "$pid" || return 1
-  process_matches_recorded_start "$pid"
+  process_matches_recorded_start "$pid" || return 1
+  process_matches_recorded_boot
 }
 
 is_temporary_running() {
@@ -198,7 +220,7 @@ inhibitors_include_temporary() {
 
 cleanup_stale_pid() {
   if ! is_persistent_running; then
-    rm -f "$pid_file" "$start_file"
+    rm -f "$pid_file" "$start_file" "$boot_file"
   fi
 }
 
@@ -233,10 +255,10 @@ stop_started_blocker() {
 }
 
 start_blocker() {
-  local pid start_time cleanup_new_blocker
+  local pid start_time boot_id cleanup_new_blocker
 
   cleanup_stale_pid
-  if is_persistent_running; then
+  if is_persistent_running || find_persistent_inhibitor_pid >/dev/null; then
     printf 'on\n'
     return 0
   fi
@@ -251,10 +273,14 @@ start_blocker() {
 
   pid="$!"
   cleanup_new_blocker=1
-  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; rm -f "$pid_file" "$start_file" "$pid_file".tmp.* "$start_file".tmp.*; fi' RETURN
+  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; rm -f "$pid_file" "$start_file" "$boot_file" "$pid_file".tmp.* "$start_file".tmp.* "$boot_file".tmp.*; fi' RETURN
 
   start_time="$(process_start_time "$pid")" || {
     printf 'failed to inspect systemd-inhibit process\n' >&2
+    return 1
+  }
+  boot_id="$(current_boot_id)" || {
+    printf 'failed to inspect boot id\n' >&2
     return 1
   }
   write_state_value "$pid_file" "$pid" || {
@@ -265,8 +291,12 @@ start_blocker() {
     printf 'failed to write state file: %s\n' "$start_file" >&2
     return 1
   }
+  write_state_value "$boot_file" "$boot_id" || {
+    printf 'failed to write state file: %s\n' "$boot_file" >&2
+    return 1
+  }
   if ! is_persistent_running || ! wait_for_persistent_inhibitor "$pid"; then
-    rm -f "$pid_file" "$start_file"
+    rm -f "$pid_file" "$start_file" "$boot_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
   fi
@@ -330,7 +360,7 @@ stop_blocker() {
     return 1
   fi
 
-  rm -f "$pid_file" "$start_file"
+  rm -f "$pid_file" "$start_file" "$boot_file"
   status
 }
 

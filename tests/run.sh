@@ -90,6 +90,14 @@ test_cli_state() {
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
   blocker_pids+=("$pid")
+  rm "$runtime_dir/nosleep/inhibit.start" "$runtime_dir/nosleep/inhibit.boot"
+  assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status after identity file loss'
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'turn off after identity file loss'
+
+  runtime_dir="$(make_tmp_dir)"
+  assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on before pid file loss'
+  pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
+  blocker_pids+=("$pid")
   rm "$runtime_dir/nosleep/inhibit.pid"
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status after pid file loss'
   assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'turn off after pid file loss'
