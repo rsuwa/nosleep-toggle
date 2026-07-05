@@ -423,6 +423,10 @@ FAKE_INHIBIT
   rm "$runtime_dir/nosleep/inhibit.pid"
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status after pid file loss'
   assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'turn off after pid file loss'
+  if kill -0 -- "-$pid" 2>/dev/null; then
+    printf 'FAIL: fallback off left blocker process group after pid file loss\n' >&2
+    exit 1
+  fi
 
   runtime_dir="$(make_tmp_dir)"
   XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" run sleep 5 &

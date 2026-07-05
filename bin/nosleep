@@ -400,7 +400,7 @@ stop_listed_persistent_blockers() {
   [[ "${#pids[@]}" -gt 0 ]] || return 0
 
   for pid in "${pids[@]}"; do
-    kill -TERM "$pid" 2>/dev/null || true
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
   done
 
   for _ in {1..20}; do
@@ -412,7 +412,7 @@ stop_listed_persistent_blockers() {
 
   if find_persistent_inhibitor_pid >/dev/null; then
     for pid in "${pids[@]}"; do
-      kill -KILL "$pid" 2>/dev/null || true
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
     done
   fi
 }
