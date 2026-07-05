@@ -391,6 +391,30 @@ stop_started_blocker() {
   kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
 }
 
+stop_listed_persistent_blockers() {
+  local pid pids
+
+  mapfile -t pids < <(find_persistent_inhibitor_pids || true)
+  [[ "${#pids[@]}" -gt 0 ]] || return 0
+
+  for pid in "${pids[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+
+  for _ in {1..20}; do
+    if ! find_persistent_inhibitor_pid >/dev/null; then
+      return 0
+    fi
+    "$sleep_cmd" 0.1
+  done
+
+  if find_persistent_inhibitor_pid >/dev/null; then
+    for pid in "${pids[@]}"; do
+      kill -KILL "$pid" 2>/dev/null || true
+    done
+  fi
+}
+
 cleanup_started_blocker() {
   local pid="$1"
 
@@ -461,7 +485,7 @@ start_blocker() {
 }
 
 stop_blocker() {
-  local pid pids
+  local pid
   pid="$(read_pid 2>/dev/null || true)"
 
   if [[ -n "$pid" ]] && process_has_recorded_identity "$pid"; then
@@ -477,28 +501,9 @@ stop_blocker() {
     if is_persistent_running; then
       kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
     fi
-  else
-    mapfile -t pids < <(find_persistent_inhibitor_pids || true)
-
-    if [[ "${#pids[@]}" -gt 0 ]]; then
-      for pid in "${pids[@]}"; do
-        kill -TERM "$pid" 2>/dev/null || true
-      done
-
-      for _ in {1..20}; do
-        if ! find_persistent_inhibitor_pid >/dev/null; then
-          break
-        fi
-        "$sleep_cmd" 0.1
-      done
-
-      if find_persistent_inhibitor_pid >/dev/null; then
-        for pid in "${pids[@]}"; do
-          kill -KILL "$pid" 2>/dev/null || true
-        done
-      fi
-    fi
   fi
+
+  stop_listed_persistent_blockers
 
   if find_persistent_inhibitor_pid >/dev/null; then
     printf 'failed to stop persistent systemd-inhibit\n' >&2

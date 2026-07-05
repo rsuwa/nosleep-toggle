@@ -312,6 +312,26 @@ FAKE_INHIBIT
   wait "$duplicate_pid_one" 2>/dev/null || true
   wait "$duplicate_pid_two" 2>/dev/null || true
 
+  runtime_dir="$(make_tmp_dir)"
+  assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on before recorded duplicate'
+  pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
+  blocker_pids+=("$pid")
+  systemd-inhibit \
+    --what=handle-lid-switch:sleep:idle \
+    --mode=block \
+    --who=nosleep:persistent \
+    --why=recorded-duplicate-nosleep \
+    -- sleep 20 &
+  duplicate_pid_one="$!"
+  run_pids+=("$duplicate_pid_one")
+  sleep 0.3
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'off stops recorded and duplicate persistent inhibitors'
+  if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:persistent' >/dev/null; then
+    printf 'FAIL: off left recorded duplicate persistent inhibitor\n' >&2
+    exit 1
+  fi
+  wait "$duplicate_pid_one" 2>/dev/null || true
+
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
   blocker_pids+=("$pid")
