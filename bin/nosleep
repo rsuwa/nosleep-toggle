@@ -238,23 +238,6 @@ recorded_persistent_inhibitor_in_list() {
   persistent_inhibitor_pid_from_list "$inhibitors" "$pid" >/dev/null
 }
 
-recorded_persistent_active() {
-  local pid="$1"
-  local inhibitors
-
-  if inhibitors="$(list_inhibitors 2>/dev/null)"; then
-    persistent_inhibitor_pid_from_list "$inhibitors" "$pid" >/dev/null
-  else
-    is_persistent_running
-  fi
-}
-
-is_temporary_running() {
-  local inhibitors
-  inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
-  inhibitors_include_temporary "$inhibitors"
-}
-
 list_inhibitors() {
   "$systemd_inhibit_cmd" --list --no-pager --no-legend
 }
