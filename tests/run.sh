@@ -80,6 +80,32 @@ test_path_poisoning() {
   }
 }
 
+test_lock_symlink() {
+  local runtime_dir fake_bin marker
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  marker="$runtime_dir/marker"
+  mkdir -p "$runtime_dir/nosleep"
+  printf 'keep\n' >"$marker"
+  ln -s "$marker" "$runtime_dir/nosleep/lock"
+  cat >"$fake_bin/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$fake_bin/systemd-inhibit"
+
+  assert_eq off "$(
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      "$repo_root/bin/nosleep" status
+  )" 'status works with lock symlink present'
+  assert_eq keep "$(<"$marker")" 'lock symlink target is not truncated'
+}
+
 test_cli_state() {
   local fake_bin runtime_dir pid spoof_pid target_pid spoof_who proc_stat fields
 
@@ -245,6 +271,7 @@ test_install_uninstall() {
 test_syntax
 test_status_list_failure
 test_path_poisoning
+test_lock_symlink
 test_cli_state
 test_extension_metadata
 test_install_uninstall

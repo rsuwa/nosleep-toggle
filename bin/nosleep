@@ -44,7 +44,6 @@ fi
 pid_file="$state_dir/inhibit.pid"
 start_file="$state_dir/inhibit.start"
 boot_file="$state_dir/inhibit.boot"
-lock_file="$state_dir/lock"
 
 what="handle-lid-switch:sleep:idle"
 who_persistent="nosleep:persistent"
@@ -540,17 +539,17 @@ case "$command" in
     run_shell
     ;;
   on)
-    exec 9>"$lock_file"
+    exec 9<"$state_dir"
     "$flock_cmd" -x 9
     start_blocker
     ;;
   off)
-    exec 9>"$lock_file"
+    exec 9<"$state_dir"
     "$flock_cmd" -x 9
     stop_blocker
     ;;
   toggle)
-    exec 9>"$lock_file"
+    exec 9<"$state_dir"
     "$flock_cmd" -x 9
     if persistent_active; then
       stop_blocker
@@ -559,7 +558,7 @@ case "$command" in
     fi
     ;;
   status)
-    exec 9>"$lock_file"
+    exec 9<"$state_dir"
     "$flock_cmd" -x 9
     status
     ;;
