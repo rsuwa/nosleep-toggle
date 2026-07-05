@@ -70,20 +70,34 @@ test_status_list_failure() {
 }
 
 test_path_poisoning() {
-  local runtime_dir fake_bin marker
+  local marker poisoned_bin runtime_dir trusted_bin
 
   runtime_dir="$(make_tmp_dir)"
-  fake_bin="$(make_tmp_dir)"
+  poisoned_bin="$(make_tmp_dir)"
+  trusted_bin="$(make_tmp_dir)"
   marker="$runtime_dir/path-command-called"
-  printf '#!/bin/sh\ntouch %q\nexec /bin/bash "$@"\n' "$marker" >"$fake_bin/bash"
-  printf '#!/usr/bin/env bash\nexit 77\n' >"$fake_bin/systemd-inhibit"
-  printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/mkdir"
-  printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/chmod"
-  chmod +x "$fake_bin/bash"
-  chmod +x "$fake_bin/systemd-inhibit"
-  chmod +x "$fake_bin/mkdir" "$fake_bin/chmod"
+  printf '#!/bin/sh\ntouch %q\nexec /bin/bash "$@"\n' "$marker" >"$poisoned_bin/bash"
+  printf '#!/bin/sh\ntouch %q\nexit 77\n' "$marker" >"$poisoned_bin/systemd-inhibit"
+  printf '#!/bin/sh\ntouch %q\nexit 77\n' "$marker" >"$poisoned_bin/mkdir"
+  printf '#!/bin/sh\ntouch %q\nexit 77\n' "$marker" >"$poisoned_bin/chmod"
+  cat >"$trusted_bin/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/bin/bash
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$poisoned_bin/bash"
+  chmod +x "$poisoned_bin/systemd-inhibit"
+  chmod +x "$poisoned_bin/mkdir" "$poisoned_bin/chmod"
+  chmod +x "$trusted_bin/systemd-inhibit"
 
-  assert_eq off "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores poisoned PATH'
+  assert_eq off "$(
+    PATH="$poisoned_bin:$PATH" \
+      NOSLEEP_TRUSTED_PATH="$trusted_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      "$repo_root/bin/nosleep" status
+  )" 'status ignores poisoned PATH'
   [[ ! -e "$marker" ]] || {
     printf 'FAIL: status used mkdir/chmod from poisoned PATH\n' >&2
     exit 1
@@ -438,13 +452,14 @@ test_extension_metadata() {
 }
 
 test_install_uninstall() {
-  local extension_uuid foreign_extension home_dir marker runtime_dir fake_bin stop_marker
+  local extension_uuid foreign_extension gnome_marker home_dir marker runtime_dir fake_bin stop_marker
 
   home_dir="$(make_tmp_dir)"
   runtime_dir="$(make_tmp_dir)"
   fake_bin="$(make_tmp_dir)"
   marker="$home_dir/path-nosleep-called"
   stop_marker="$home_dir/source-nosleep-called"
+  gnome_marker="$home_dir/gnome-extensions-called"
   extension_uuid="nosleep-toggle@systemd-inhibit.local"
 
   mkdir -p "$home_dir/.local/bin" "$home_dir/.local/share/gnome-shell/extensions"
@@ -465,26 +480,50 @@ test_install_uninstall() {
   assert_eq /tmp/foreign-nosleep "$(readlink "$home_dir/.local/bin/nosleep")" 'foreign CLI link preserved'
   assert_eq "$foreign_extension" "$(readlink "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid")" 'foreign extension link preserved'
 
-  printf '#!/usr/bin/env bash\necho enable failed >&2\nexit 1\n' >"$fake_bin/gnome-extensions"
+  cat >"$fake_bin/gnome-extensions" <<FAKE_GNOME_EXTENSIONS
+#!/bin/bash
+printf '%s\\n' "\$*" >> $(printf '%q' "$gnome_marker")
+if [[ "\${1:-}" == "enable" ]]; then
+  echo enable failed >&2
+  exit 1
+fi
+FAKE_GNOME_EXTENSIONS
   chmod +x "$fake_bin/gnome-extensions"
 
-  HOME="$home_dir" PATH="$fake_bin:$PATH" "$repo_root/install.sh" >/dev/null 2>/dev/null
+  HOME="$home_dir" PATH="$fake_bin:$PATH" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    "$repo_root/install.sh" >/dev/null 2>/dev/null
   assert_eq "$repo_root/bin/nosleep" "$(readlink "$home_dir/.local/bin/nosleep")" 'installed CLI link'
+  assert_eq "$repo_root/extension" "$(readlink "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid")" 'installed extension link'
   compgen -G "$home_dir/.local/bin/nosleep.bak.*/nosleep" >/dev/null || {
     printf 'FAIL: install did not back up foreign symlink\n' >&2
+    exit 1
+  }
+  grep -Fx "enable $extension_uuid" "$gnome_marker" >/dev/null || {
+    printf 'FAIL: install did not call test gnome-extensions helper\n' >&2
     exit 1
   }
 
   printf '#!/usr/bin/env bash\ntouch %q\n' "$marker" >"$fake_bin/nosleep"
   chmod +x "$fake_bin/nosleep"
 
-  HOME="$home_dir" XDG_RUNTIME_DIR="$runtime_dir" PATH="$fake_bin:$PATH" "$repo_root/uninstall.sh" >/dev/null 2>/dev/null
+  HOME="$home_dir" XDG_RUNTIME_DIR="$runtime_dir" PATH="$fake_bin:$PATH" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    "$repo_root/uninstall.sh" >/dev/null 2>/dev/null
   [[ ! -e "$marker" ]] || {
     printf 'FAIL: uninstall called nosleep from PATH\n' >&2
     exit 1
   }
+  grep -Fx "disable $extension_uuid" "$gnome_marker" >/dev/null || {
+    printf 'FAIL: uninstall did not call test gnome-extensions helper\n' >&2
+    exit 1
+  }
   [[ ! -e "$home_dir/.local/bin/nosleep" ]] || {
     printf 'FAIL: uninstall left CLI link behind\n' >&2
+    exit 1
+  }
+  [[ ! -e "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid" ]] || {
+    printf 'FAIL: uninstall left extension link behind\n' >&2
     exit 1
   }
 }

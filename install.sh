@@ -8,6 +8,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bin_dir="$HOME/.local/bin"
 extension_root="$HOME/.local/share/gnome-shell/extensions"
 extension_uuid="nosleep-toggle@systemd-inhibit.local"
+gnome_extensions_cmd="${NOSLEEP_GNOME_EXTENSIONS_CMD:-}"
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   printf 'Do not run install.sh as root. Run it as your desktop user.\n' >&2
@@ -20,6 +21,10 @@ for command in systemd-inhibit flock setsid; do
     exit 1
   fi
 done
+
+if [[ -z "$gnome_extensions_cmd" ]] && command -v gnome-extensions >/dev/null 2>&1; then
+  gnome_extensions_cmd="$(command -v gnome-extensions)"
+fi
 
 backup_path() {
   local link="$1"
@@ -56,8 +61,8 @@ mkdir -p "$bin_dir" "$extension_root"
 link_path "$repo_root/bin/nosleep" "$bin_dir/nosleep"
 link_path "$repo_root/extension" "$extension_root/$extension_uuid"
 
-if command -v gnome-extensions >/dev/null 2>&1; then
-  if ! enable_output="$(gnome-extensions enable "$extension_uuid" 2>&1)"; then
+if [[ -n "$gnome_extensions_cmd" ]]; then
+  if ! enable_output="$("$gnome_extensions_cmd" enable "$extension_uuid" 2>&1)"; then
     printf 'Warning: could not enable GNOME extension %s.\n' "$extension_uuid" >&2
     if [[ -n "$enable_output" ]]; then
       printf '%s\n' "$enable_output" >&2

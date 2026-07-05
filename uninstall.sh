@@ -10,10 +10,15 @@ installed_cli="$HOME/.local/bin/nosleep"
 installed_extension="$HOME/.local/share/gnome-shell/extensions/$extension_uuid"
 cli_target="$repo_root/bin/nosleep"
 extension_target="$repo_root/extension"
+gnome_extensions_cmd="${NOSLEEP_GNOME_EXTENSIONS_CMD:-}"
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   printf 'Do not run uninstall.sh as root. Run it as your desktop user.\n' >&2
   exit 1
+fi
+
+if [[ -z "$gnome_extensions_cmd" ]] && command -v gnome-extensions >/dev/null 2>&1; then
+  gnome_extensions_cmd="$(command -v gnome-extensions)"
 fi
 
 remove_owned_link() {
@@ -44,8 +49,8 @@ if installed_cli_owned && [[ -x "$cli_target" ]]; then
   fi
 fi
 
-if installed_extension_owned && command -v gnome-extensions >/dev/null 2>&1; then
-  if ! disable_output="$(gnome-extensions disable "$extension_uuid" 2>&1)"; then
+if installed_extension_owned && [[ -n "$gnome_extensions_cmd" ]]; then
+  if ! disable_output="$("$gnome_extensions_cmd" disable "$extension_uuid" 2>&1)"; then
     printf 'Warning: could not disable GNOME extension %s.\n' "$extension_uuid" >&2
     if [[ -n "$disable_output" ]]; then
       printf '%s\n' "$disable_output" >&2
