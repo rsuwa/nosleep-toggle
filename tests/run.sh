@@ -61,6 +61,17 @@ test_status_list_failure() {
   fi
 }
 
+test_path_poisoning() {
+  local runtime_dir fake_bin
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  printf '#!/usr/bin/env bash\nexit 77\n' >"$fake_bin/systemd-inhibit"
+  chmod +x "$fake_bin/systemd-inhibit"
+
+  assert_eq off "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores poisoned PATH'
+}
+
 test_cli_state() {
   local fake_bin runtime_dir pid spoof_pid
 
@@ -116,6 +127,26 @@ test_cli_state() {
   assert_eq dash-command-ran "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" run -dashcmd)" 'dash-prefixed command'
 }
 
+test_extension_metadata() {
+  local extension_uuid metadata_uuid icon
+
+  extension_uuid="nosleep-toggle@systemd-inhibit.local"
+  metadata_uuid="$(sed -n 's/.*"uuid": *"\([^"]*\)".*/\1/p' "$repo_root/extension/metadata.json")"
+  assert_eq "$extension_uuid" "$metadata_uuid" 'metadata UUID'
+
+  grep -F '"shell-version": ["46"]' "$repo_root/extension/metadata.json" >/dev/null || {
+    printf 'FAIL: metadata shell-version does not include GNOME Shell 46\n' >&2
+    exit 1
+  }
+
+  while IFS= read -r icon; do
+    [[ -f "$repo_root/extension/icons/$icon" ]] || {
+      printf 'FAIL: missing extension icon: %s\n' "$icon" >&2
+      exit 1
+    }
+  done < <(grep -o 'nosleep-[a-z]*-symbolic\.svg' "$repo_root/extension/extension.js" | sort -u)
+}
+
 test_install_uninstall() {
   local home_dir runtime_dir fake_bin marker
 
@@ -152,7 +183,9 @@ test_install_uninstall() {
 
 test_syntax
 test_status_list_failure
+test_path_poisoning
 test_cli_state
+test_extension_metadata
 test_install_uninstall
 
 printf 'All tests passed.\n'
