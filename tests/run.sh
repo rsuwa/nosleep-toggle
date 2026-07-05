@@ -232,6 +232,15 @@ test_extension_metadata() {
       exit 1
     }
   done < <(grep -o 'nosleep-[a-z]*-symbolic\.svg' "$repo_root/extension/extension.js" | sort -u)
+
+  grep -F 'send_signal(SIGTERM)' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not terminate subprocesses gracefully first\n' >&2
+    exit 1
+  }
+  grep -F 'FORCE_EXIT_DELAY_SECONDS' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not keep a delayed force-exit fallback\n' >&2
+    exit 1
+  }
 }
 
 test_install_uninstall() {

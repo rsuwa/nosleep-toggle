@@ -13,6 +13,8 @@ const UUID = 'nosleep-toggle@systemd-inhibit.local';
 const REFRESH_INTERVAL_SECONDS = 3;
 const MAX_REFRESH_INTERVAL_SECONDS = 30;
 const COMMAND_TIMEOUT_SECONDS = 5;
+const FORCE_EXIT_DELAY_SECONDS = 1;
+const SIGTERM = 15;
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 
@@ -133,7 +135,7 @@ class NoSleepIndicator extends PanelMenu.Button {
 
     async _runCtl(args, {notify = true} = {}) {
         const cancellable = new Gio.Cancellable();
-        const control = {cancellable, proc: null};
+        const control = {cancellable, proc: null, forceExitSourceId: 0};
         let proc = null;
         let cancelId = 0;
         let timeoutId = 0;
@@ -147,7 +149,7 @@ class NoSleepIndicator extends PanelMenu.Button {
             );
             control.proc = proc;
 
-            cancelId = cancellable.connect(() => proc.force_exit());
+            cancelId = cancellable.connect(() => this._terminateControl(control));
             timeoutId = GLib.timeout_add_seconds(
                 GLib.PRIORITY_DEFAULT,
                 COMMAND_TIMEOUT_SECONDS,
@@ -159,7 +161,7 @@ class NoSleepIndicator extends PanelMenu.Button {
                 }
             );
 
-            const [stdout, stderr] = await proc.communicate_utf8_async(null, cancellable);
+            const [stdout, stderr] = await proc.communicate_utf8_async(null, null);
 
             if (!proc.get_successful()) {
                 const message = (stderr || stdout || 'nosleep failed').trim();
@@ -176,10 +178,38 @@ class NoSleepIndicator extends PanelMenu.Button {
         } finally {
             if (timeoutId)
                 GLib.Source.remove(timeoutId);
+            if (control.forceExitSourceId)
+                GLib.Source.remove(control.forceExitSourceId);
             if (cancelId)
                 cancellable.disconnect(cancelId);
             this._activeControls.delete(control);
         }
+    }
+
+    _terminateControl(control) {
+        if (!control.proc)
+            return;
+
+        try {
+            control.proc.send_signal(SIGTERM);
+        } catch {
+            control.proc.force_exit();
+            return;
+        }
+
+        if (control.forceExitSourceId)
+            return;
+
+        control.forceExitSourceId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            FORCE_EXIT_DELAY_SECONDS,
+            () => {
+                control.forceExitSourceId = 0;
+                if (control.proc)
+                    control.proc.force_exit();
+                return GLib.SOURCE_REMOVE;
+            }
+        );
     }
 
     async _refresh({notify = false} = {}) {
@@ -269,8 +299,7 @@ class NoSleepIndicator extends PanelMenu.Button {
 
         for (const control of [...this._activeControls]) {
             control.cancellable.cancel();
-            if (control.proc)
-                control.proc.force_exit();
+            this._terminateControl(control);
         }
         this._activeControls.clear();
 
