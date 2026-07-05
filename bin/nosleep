@@ -454,7 +454,7 @@ stop_blocker() {
   local pid
   pid="$(read_pid 2>/dev/null || true)"
 
-  if [[ -n "$pid" ]] && process_has_recorded_identity "$pid" && recorded_persistent_active "$pid"; then
+  if [[ -n "$pid" ]] && process_has_recorded_identity "$pid"; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 
     for _ in {1..20}; do

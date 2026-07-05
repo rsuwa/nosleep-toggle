@@ -236,6 +236,33 @@ FAKE_INHIBIT
     exit 1
   fi
 
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on before list miss'
+  pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
+  blocker_pids+=("$pid")
+  cat >"$fake_bin/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$fake_bin/systemd-inhibit"
+  assert_eq off "$(
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      "$repo_root/bin/nosleep" off
+  )" 'off stops recorded inhibitor when list misses it'
+  if kill -0 "$pid" 2>/dev/null; then
+    printf 'FAIL: off left recorded blocker running after list miss\n' >&2
+    exit 1
+  fi
+  if compgen -G "$runtime_dir/nosleep/inhibit.*" >/dev/null; then
+    printf 'FAIL: off left recorded state files after list miss\n' >&2
+    exit 1
+  fi
+
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
   blocker_pids+=("$pid")
