@@ -130,6 +130,7 @@ inhibitor_pid_from_list() {
   local inhibitors="$1"
   local expected_who="$2"
   local allow_legacy="${3:-0}"
+  local expected_pid="${4:-}"
   local line inhibitor_who inhibitor_uid inhibitor_pid inhibitor_comm inhibitor_what inhibitor_mode
 
   while IFS= read -r line; do
@@ -143,6 +144,7 @@ inhibitor_pid_from_list() {
     fi
     [[ "$inhibitor_uid" == "$current_uid" ]] || continue
     [[ "$inhibitor_pid" =~ ^[0-9]+$ ]] || continue
+    [[ -z "$expected_pid" || "$inhibitor_pid" == "$expected_pid" ]] || continue
     [[ "$inhibitor_comm" == "systemd-inhibit" ]] || continue
     [[ "$inhibitor_mode" == "block" ]] || continue
     [[ ":$inhibitor_what:" == *":handle-lid-switch:"* ]] || continue
@@ -157,7 +159,7 @@ inhibitor_pid_from_list() {
 }
 
 persistent_inhibitor_pid_from_list() {
-  inhibitor_pid_from_list "$1" "$who_persistent" 1
+  inhibitor_pid_from_list "$1" "$who_persistent" 1 "${2:-}"
 }
 
 temporary_inhibitor_pid_from_list() {
@@ -165,9 +167,23 @@ temporary_inhibitor_pid_from_list() {
 }
 
 find_persistent_inhibitor_pid() {
+  local expected_pid="${1:-}"
   local inhibitors
   inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
-  persistent_inhibitor_pid_from_list "$inhibitors"
+  persistent_inhibitor_pid_from_list "$inhibitors" "$expected_pid"
+}
+
+wait_for_persistent_inhibitor() {
+  local pid="$1"
+
+  for _ in {1..20}; do
+    if find_persistent_inhibitor_pid "$pid" >/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  return 1
 }
 
 inhibitors_include_persistent() {
@@ -206,9 +222,7 @@ start_blocker() {
   if start_time="$(process_start_time "$pid" 2>/dev/null)"; then
     printf '%s\n' "$start_time" >"$start_file"
   fi
-  sleep 0.2
-
-  if ! is_persistent_running; then
+  if ! is_persistent_running || ! wait_for_persistent_inhibitor "$pid"; then
     rm -f "$pid_file" "$start_file"
     printf 'failed to start systemd-inhibit\n' >&2
     return 1
