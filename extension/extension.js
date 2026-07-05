@@ -289,7 +289,6 @@ class NoSleepIndicator extends PanelMenu.Button {
             return;
 
         this._actionInFlight = true;
-        this._stateGeneration++;
         try {
             if (!this._statusLoaded) {
                 await this._refresh({notify: true, force: true});
@@ -302,6 +301,7 @@ class NoSleepIndicator extends PanelMenu.Button {
             }
 
             const command = this._state === 'on' ? 'off' : 'on';
+            this._stateGeneration++;
             const state = await this._runCtl([command]);
             if (this._destroyed)
                 return;
