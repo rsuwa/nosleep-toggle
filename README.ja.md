@@ -80,10 +80,13 @@ nosleep
 ## テスト
 
 ```bash
+npm install
+npm run lint:js
 ./tests/run.sh
 ```
 
 テストスクリプトは、一時的なランタイムディレクトリとホームディレクトリを使います。
+npm 依存関係がインストール済みの場合は、JavaScript lint も実行します。
 別の `nosleep` inhibitor がすでに有効な場合、CLI 状態テストはスキップします。
 
 ## 注意

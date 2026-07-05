@@ -80,10 +80,13 @@ Running `nosleep` without arguments starts an inhibited shell.
 ## Test
 
 ```bash
+npm install
+npm run lint:js
 ./tests/run.sh
 ```
 
 The test script uses temporary runtime and home directories.
+When npm dependencies are installed, it also runs the JavaScript lint check.
 It skips the CLI state test if another `nosleep` inhibitor is already active.
 
 ## Safety
