@@ -47,6 +47,14 @@ test_syntax() {
   bash -n "$repo_root/bin/nosleep" "$repo_root/install.sh" "$repo_root/uninstall.sh"
 }
 
+test_js_lint() {
+  if [[ -x "$repo_root/node_modules/.bin/eslint" ]]; then
+    npm --prefix "$repo_root" run lint:js >/dev/null
+  else
+    printf 'SKIP: JS lint skipped because npm dependencies are not installed\n'
+  fi
+}
+
 test_status_list_failure() {
   local runtime_dir fake_bin
 
@@ -443,6 +451,7 @@ test_install_uninstall() {
 }
 
 test_syntax
+test_js_lint
 test_status_list_failure
 test_path_poisoning
 test_lock_symlink

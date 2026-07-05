@@ -1,0 +1,22 @@
+{
+  "name": "nosleep-toggle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GNOME Shell extension and CLI for toggling systemd sleep inhibition.",
+  "scripts": {
+    "lint:js": "eslint extension/extension.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rsuwa/nosleep-toggle.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/rsuwa/nosleep-toggle/issues"
+  },
+  "homepage": "https://github.com/rsuwa/nosleep-toggle#readme",
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4"
+  }
+}

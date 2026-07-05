@@ -20,6 +20,8 @@ There is no build step. Development usually happens directly from the checked-ou
 - `./install.sh`: installs local symlinks for `bin/nosleep` and the GNOME extension.
 - `./uninstall.sh`: when installed links point to this checkout, stops persistent NoSleep, disables the extension when possible, and removes only owned links.
 - `./tests/run.sh`: runs the repository smoke/regression tests, including adversarial inhibitor parsing, interrupted start cleanup, duplicate blocker cleanup, PATH poisoning, state directory and lock handling, installer behavior, metadata, and icon references.
+- `npm install`: installs JavaScript lint tooling from `package-lock.json`.
+- `npm run lint:js`: runs ESLint against the GNOME Shell extension.
 - `bash -n bin/nosleep install.sh uninstall.sh tests/run.sh`: checks Bash syntax.
 - `shellcheck bin/nosleep install.sh uninstall.sh tests/run.sh`: runs optional Bash linting if ShellCheck is installed.
 - `nosleep status`: verifies CLI state after installation; expected output is `off`, `on`, or `running`.
