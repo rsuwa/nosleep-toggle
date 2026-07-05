@@ -73,7 +73,7 @@ test_path_poisoning() {
 }
 
 test_cli_state() {
-  local fake_bin runtime_dir pid spoof_pid
+  local fake_bin runtime_dir pid spoof_pid target_pid spoof_who
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -97,6 +97,24 @@ test_cli_state() {
   assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores spoofed persistent reason'
   kill "$spoof_pid" 2>/dev/null || true
   wait "$spoof_pid" 2>/dev/null || true
+
+  sleep 20 &
+  target_pid="$!"
+  run_pids+=("$target_pid")
+  spoof_who="nosleep:persistent $(id -u) $(id -un) $target_pid systemd-inhibit handle-lid-switch:sleep:idle filler"
+  systemd-inhibit --what=handle-lid-switch:sleep:idle --mode=block --who="$spoof_who" --why=spoofed-nosleep sleep 5 &
+  spoof_pid="$!"
+  run_pids+=("$spoof_pid")
+  sleep 0.3
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores whitespace-spoofed persistent who'
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'off ignores whitespace-spoofed persistent who'
+  if ! kill -0 "$target_pid" 2>/dev/null; then
+    printf 'FAIL: off killed pid injected through inhibitor who field\n' >&2
+    exit 1
+  fi
+  kill "$spoof_pid" "$target_pid" 2>/dev/null || true
+  wait "$spoof_pid" 2>/dev/null || true
+  wait "$target_pid" 2>/dev/null || true
 
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"

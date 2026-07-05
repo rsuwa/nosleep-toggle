@@ -28,8 +28,6 @@ id_cmd="$(resolve_required_command id)"
 systemd_inhibit_cmd="$(resolve_required_command systemd-inhibit)"
 setsid_cmd="$(resolve_required_command setsid)"
 flock_cmd="$(resolve_required_command flock)"
-grep_cmd="$(resolve_required_command grep)"
-tr_cmd="$(resolve_required_command tr)"
 mktemp_cmd="$(resolve_required_command mktemp)"
 mv_cmd="$(resolve_required_command mv)"
 rm_cmd="$(resolve_required_command rm)"
@@ -110,16 +108,68 @@ is_persistent_running() {
   process_matches_recorded_boot
 }
 
+process_uid_matches_current() {
+  local pid="$1"
+  local key real_uid
+
+  [[ -r "/proc/$pid/status" ]] || return 1
+  while read -r key real_uid _; do
+    if [[ "$key" == "Uid:" ]]; then
+      [[ "$real_uid" == "$current_uid" ]]
+      return
+    fi
+  done <"/proc/$pid/status"
+
+  return 1
+}
+
+process_matches_inhibitor_invocation() {
+  local pid="$1"
+  local expected_who="$2"
+  local allow_legacy="${3:-0}"
+  local arg index found_who found_what found_mode
+
+  process_uid_matches_current "$pid" || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+
+  index=0
+  found_who=0
+  found_what=0
+  found_mode=0
+  while IFS= read -r -d '' arg; do
+    if [[ "$index" -eq 0 ]]; then
+      [[ "${arg##*/}" == "systemd-inhibit" ]] || return 1
+    fi
+
+    case "$arg" in
+      "--who=$expected_who")
+        found_who=1
+        ;;
+      "--who=$who_legacy")
+        if [[ "$allow_legacy" -eq 1 ]]; then
+          found_who=1
+        fi
+        ;;
+      "--what=$what")
+        found_what=1
+        ;;
+      "--mode=block")
+        found_mode=1
+        ;;
+    esac
+
+    ((index += 1))
+  done <"/proc/$pid/cmdline"
+
+  [[ "$index" -gt 0 ]] || return 1
+  [[ "$found_who" -eq 1 ]] || return 1
+  [[ "$found_what" -eq 1 ]] || return 1
+  [[ "$found_mode" -eq 1 ]]
+}
+
 process_matches_persistent() {
   local pid="$1"
-  local argv
-
-  [[ -r "/proc/$pid/cmdline" ]] || return 1
-  argv="$("$tr_cmd" '\0' '\n' 2>/dev/null <"/proc/$pid/cmdline")" || return 1
-
-  "$grep_cmd" -E '(^|/)systemd-inhibit$' <<<"$argv" >/dev/null || return 1
-  "$grep_cmd" -Fx -- "--who=$who_persistent" <<<"$argv" >/dev/null \
-    || "$grep_cmd" -Fx -- "--who=$who_legacy" <<<"$argv" >/dev/null
+  process_matches_inhibitor_invocation "$pid" "$who_persistent" 1
 }
 
 process_start_time() {
@@ -207,6 +257,7 @@ inhibitor_pid_from_list() {
     [[ ":$inhibitor_what:" == *":handle-lid-switch:"* ]] || continue
     [[ ":$inhibitor_what:" == *":sleep:"* ]] || continue
     [[ ":$inhibitor_what:" == *":idle:"* ]] || continue
+    process_matches_inhibitor_invocation "$inhibitor_pid" "$expected_who" "$allow_legacy" || continue
 
     printf '%s\n' "$inhibitor_pid"
     return 0
