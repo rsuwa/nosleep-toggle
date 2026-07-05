@@ -337,8 +337,24 @@ test_extension_metadata() {
     }
   done < <(grep -o 'nosleep-[a-z]*-symbolic\.svg' "$repo_root/extension/extension.js" | sort -u)
 
-  grep -F 'send_signal(SIGTERM)' "$repo_root/extension/extension.js" >/dev/null || {
+  grep -F '_signalControl(control, SIGTERM)' "$repo_root/extension/extension.js" >/dev/null || {
     printf 'FAIL: extension does not terminate subprocesses gracefully first\n' >&2
+    exit 1
+  }
+  grep -F "const SETSID_PATH = '/usr/bin/setsid';" "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not launch controls in a new session\n' >&2
+    exit 1
+  }
+  grep -F 'get_identifier' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not track the subprocess process group\n' >&2
+    exit 1
+  }
+  grep -F 'processGroupId' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not signal subprocess process groups\n' >&2
+    exit 1
+  }
+  grep -F 'SIGKILL' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not keep a process group force-kill fallback\n' >&2
     exit 1
   }
   grep -F 'FORCE_EXIT_DELAY_SECONDS' "$repo_root/extension/extension.js" >/dev/null || {
