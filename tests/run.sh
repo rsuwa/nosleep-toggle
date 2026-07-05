@@ -62,7 +62,7 @@ test_status_list_failure() {
 }
 
 test_cli_state() {
-  local runtime_dir pid
+  local runtime_dir pid spoof_pid
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -71,6 +71,22 @@ test_cli_state() {
 
   runtime_dir="$(make_tmp_dir)"
   assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'initial status'
+  systemd-inhibit --what=sleep --mode=block --who=other-tool --why=nosleep:running sleep 5 &
+  spoof_pid="$!"
+  run_pids+=("$spoof_pid")
+  sleep 0.3
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores spoofed running reason'
+  kill "$spoof_pid" 2>/dev/null || true
+  wait "$spoof_pid" 2>/dev/null || true
+
+  systemd-inhibit --what=sleep --mode=block --who=other-tool --why=nosleep:persistent sleep 5 &
+  spoof_pid="$!"
+  run_pids+=("$spoof_pid")
+  sleep 0.3
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores spoofed persistent reason'
+  kill "$spoof_pid" 2>/dev/null || true
+  wait "$spoof_pid" 2>/dev/null || true
+
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
   blocker_pids+=("$pid")

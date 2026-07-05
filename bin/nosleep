@@ -126,8 +126,10 @@ list_inhibitors() {
   systemd-inhibit --list --no-pager --no-legend
 }
 
-persistent_inhibitor_pid_from_list() {
+inhibitor_pid_from_list() {
   local inhibitors="$1"
+  local expected_who="$2"
+  local allow_legacy="${3:-0}"
   local line inhibitor_who inhibitor_uid inhibitor_pid inhibitor_comm inhibitor_what inhibitor_mode
 
   while IFS= read -r line; do
@@ -136,7 +138,9 @@ persistent_inhibitor_pid_from_list() {
     read -r inhibitor_who inhibitor_uid _inhibitor_user inhibitor_pid inhibitor_comm inhibitor_what _ <<<"$line"
     inhibitor_mode="${line##* }"
 
-    [[ "$inhibitor_who" == "$who_persistent" || "$inhibitor_who" == "$who_legacy" ]] || continue
+    if [[ "$inhibitor_who" != "$expected_who" ]]; then
+      [[ "$allow_legacy" -eq 1 && "$inhibitor_who" == "$who_legacy" ]] || continue
+    fi
     [[ "$inhibitor_uid" == "$current_uid" ]] || continue
     [[ "$inhibitor_pid" =~ ^[0-9]+$ ]] || continue
     [[ "$inhibitor_comm" == "systemd-inhibit" ]] || continue
@@ -152,6 +156,14 @@ persistent_inhibitor_pid_from_list() {
   return 1
 }
 
+persistent_inhibitor_pid_from_list() {
+  inhibitor_pid_from_list "$1" "$who_persistent" 1
+}
+
+temporary_inhibitor_pid_from_list() {
+  inhibitor_pid_from_list "$1" "$who_running"
+}
+
 find_persistent_inhibitor_pid() {
   local inhibitors
   inhibitors="$(list_inhibitors 2>/dev/null)" || return 1
@@ -160,13 +172,12 @@ find_persistent_inhibitor_pid() {
 
 inhibitors_include_persistent() {
   local inhibitors="$1"
-  grep -F "$who_persistent" <<<"$inhibitors" >/dev/null \
-    || grep -E "^${who_legacy}[[:space:]]" <<<"$inhibitors" >/dev/null
+  persistent_inhibitor_pid_from_list "$inhibitors" >/dev/null
 }
 
 inhibitors_include_temporary() {
   local inhibitors="$1"
-  grep -F "$who_running" <<<"$inhibitors" >/dev/null
+  temporary_inhibitor_pid_from_list "$inhibitors" >/dev/null
 }
 
 cleanup_stale_pid() {
