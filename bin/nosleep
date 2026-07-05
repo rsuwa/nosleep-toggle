@@ -297,13 +297,16 @@ start_blocker() {
     return 0
   fi
 
-  "$setsid_cmd" "$systemd_inhibit_cmd" \
-    --what="$what" \
-    --mode=block \
-    --who="$who_persistent" \
-    --why="$why" \
-    -- \
-    "$sleep_cmd" infinity >/dev/null 2>&1 9>&- &
+  (
+    cd / || exit 1
+    exec "$setsid_cmd" "$systemd_inhibit_cmd" \
+      --what="$what" \
+      --mode=block \
+      --who="$who_persistent" \
+      --why="$why" \
+      -- \
+      "$sleep_cmd" infinity
+  ) </dev/null >/dev/null 2>&1 9>&- &
 
   pid="$!"
   cleanup_new_blocker=1
