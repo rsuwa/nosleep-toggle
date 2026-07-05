@@ -28,6 +28,8 @@ id_cmd="$(resolve_required_command id)"
 systemd_inhibit_cmd="$(resolve_required_command systemd-inhibit)"
 setsid_cmd="$(resolve_required_command setsid)"
 flock_cmd="$(resolve_required_command flock)"
+mkdir_cmd="$(resolve_required_command mkdir)"
+chmod_cmd="$(resolve_required_command chmod)"
 mktemp_cmd="$(resolve_required_command mktemp)"
 mv_cmd="$(resolve_required_command mv)"
 rm_cmd="$(resolve_required_command rm)"
@@ -57,38 +59,37 @@ prepare_state_dir() {
     exit 1
   fi
 
-  mkdir -p "$state_dir"
+  "$mkdir_cmd" -p -- "$state_dir"
 
   if [[ ! -d "$state_dir" || ! -O "$state_dir" ]]; then
     printf 'unsafe state directory: %s\n' "$state_dir" >&2
     exit 1
   fi
 
-  chmod 700 "$state_dir"
+  "$chmod_cmd" 700 -- "$state_dir"
 }
 
 prepare_state_dir
 
 usage() {
-  cat <<'EOF'
-Usage:
-  nosleep on              Block sleep, idle sleep, and lid-close suspend.
-  nosleep off             Stop the persistent blocker.
-  nosleep toggle          Toggle the persistent blocker.
-  nosleep status          Print "on", "running", or "off".
-  nosleep shell           Start an inhibited shell. Type "exit" to release.
-  nosleep run <command>   Run a command while sleep is blocked.
-  nosleep <command> [...] Shortcut for "nosleep run <command> [...]".
-  nosleep --raw-status    Print the raw global systemd-inhibit list.
-
-Examples:
-  nosleep on
-  nosleep off
-  nosleep status
-  nosleep long-command --option
-  nosleep run long-command --option
-  nosleep run bash -lc 'long-command --option'
-EOF
+  printf '%s\n' \
+    'Usage:' \
+    '  nosleep on              Block sleep, idle sleep, and lid-close suspend.' \
+    '  nosleep off             Stop the persistent blocker.' \
+    '  nosleep toggle          Toggle the persistent blocker.' \
+    '  nosleep status          Print "on", "running", or "off".' \
+    '  nosleep shell           Start an inhibited shell. Type "exit" to release.' \
+    '  nosleep run <command>   Run a command while sleep is blocked.' \
+    '  nosleep <command> [...] Shortcut for "nosleep run <command> [...]".' \
+    '  nosleep --raw-status    Print the raw global systemd-inhibit list.' \
+    '' \
+    'Examples:' \
+    '  nosleep on' \
+    '  nosleep off' \
+    '  nosleep status' \
+    '  nosleep long-command --option' \
+    '  nosleep run long-command --option' \
+    "  nosleep run bash -lc 'long-command --option'"
 }
 
 read_pid() {

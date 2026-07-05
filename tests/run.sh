@@ -62,14 +62,22 @@ test_status_list_failure() {
 }
 
 test_path_poisoning() {
-  local runtime_dir fake_bin
+  local runtime_dir fake_bin marker
 
   runtime_dir="$(make_tmp_dir)"
   fake_bin="$(make_tmp_dir)"
+  marker="$runtime_dir/path-command-called"
   printf '#!/usr/bin/env bash\nexit 77\n' >"$fake_bin/systemd-inhibit"
+  printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/mkdir"
+  printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/chmod"
   chmod +x "$fake_bin/systemd-inhibit"
+  chmod +x "$fake_bin/mkdir" "$fake_bin/chmod"
 
   assert_eq off "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status ignores poisoned PATH'
+  [[ ! -e "$marker" ]] || {
+    printf 'FAIL: status used mkdir/chmod from poisoned PATH\n' >&2
+    exit 1
+  }
 }
 
 test_cli_state() {
