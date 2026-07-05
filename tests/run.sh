@@ -130,7 +130,7 @@ test_state_dir_symlink() {
 }
 
 test_cli_state() {
-  local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit runtime_dir
+  local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit real_setsid runtime_dir
   local duplicate_pid_one duplicate_pid_two spoof_pid spoof_who target_pid
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
@@ -258,6 +258,25 @@ FAKE_INHIBIT
     printf 'FAIL: interrupted start left state files\n' >&2
     exit 1
   fi
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  real_setsid="$(command -v setsid)"
+  cat >"$fake_bin/setsid" <<FAKE_SETSID
+#!/usr/bin/env bash
+sleep 0.4
+exec "$real_setsid" "\$@"
+FAKE_SETSID
+  chmod +x "$fake_bin/setsid"
+  assert_eq on "$(
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      "$repo_root/bin/nosleep" on
+  )" 'turn on waits for delayed setsid'
+  pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
+  blocker_pids+=("$pid")
+  assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" status)" 'status after delayed setsid'
+  assert_eq off "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" off)" 'turn off after delayed setsid'
 
   runtime_dir="$(make_tmp_dir)"
   fake_bin="$(make_tmp_dir)"
