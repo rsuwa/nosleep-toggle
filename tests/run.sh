@@ -241,6 +241,10 @@ test_extension_metadata() {
     printf 'FAIL: extension does not keep a delayed force-exit fallback\n' >&2
     exit 1
   }
+  grep -F '_stateGeneration' "$repo_root/extension/extension.js" >/dev/null || {
+    printf 'FAIL: extension does not guard stale refresh results\n' >&2
+    exit 1
+  }
 }
 
 test_install_uninstall() {

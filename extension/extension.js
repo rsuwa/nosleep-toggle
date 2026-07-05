@@ -65,6 +65,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
         this._refreshInFlight = false;
         this._actionInFlight = false;
+        this._stateGeneration = 0;
         this._destroyed = false;
         this._activeControls = new Set();
 
@@ -212,13 +213,17 @@ class NoSleepIndicator extends PanelMenu.Button {
         );
     }
 
-    async _refresh({notify = false} = {}) {
-        if (this._refreshInFlight)
+    async _refresh({notify = false, force = false} = {}) {
+        if (this._refreshInFlight || (!force && this._actionInFlight))
             return;
 
+        const generation = this._stateGeneration;
         this._refreshInFlight = true;
         try {
             const state = await this._runCtl(['status'], {notify});
+            if (!force && (this._destroyed || this._actionInFlight || generation !== this._stateGeneration))
+                return;
+
             if (!this._destroyed && state && STATES[state]) {
                 this._setState(state);
                 this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
@@ -236,9 +241,10 @@ class NoSleepIndicator extends PanelMenu.Button {
             return;
 
         this._actionInFlight = true;
+        this._stateGeneration++;
         try {
             if (this._state === 'unknown') {
-                await this._refresh({notify: true});
+                await this._refresh({notify: true, force: true});
                 return;
             }
 
