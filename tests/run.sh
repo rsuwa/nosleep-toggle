@@ -370,15 +370,33 @@ test_extension_metadata() {
 }
 
 test_install_uninstall() {
-  local home_dir runtime_dir fake_bin marker
+  local extension_uuid foreign_extension home_dir marker runtime_dir fake_bin stop_marker
 
   home_dir="$(make_tmp_dir)"
   runtime_dir="$(make_tmp_dir)"
   fake_bin="$(make_tmp_dir)"
   marker="$home_dir/path-nosleep-called"
+  stop_marker="$home_dir/source-nosleep-called"
+  extension_uuid="nosleep-toggle@systemd-inhibit.local"
 
-  mkdir -p "$home_dir/.local/bin"
+  mkdir -p "$home_dir/.local/bin" "$home_dir/.local/share/gnome-shell/extensions"
   ln -s /tmp/foreign-nosleep "$home_dir/.local/bin/nosleep"
+  foreign_extension="$home_dir/foreign-extension"
+  mkdir -p "$foreign_extension"
+  ln -s "$foreign_extension" "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid"
+  printf '#!/bin/bash\ntouch %q\nexit 77\n' "$stop_marker" >"$fake_bin/systemd-inhibit"
+  chmod +x "$fake_bin/systemd-inhibit"
+
+  HOME="$home_dir" XDG_RUNTIME_DIR="$runtime_dir" \
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$repo_root/uninstall.sh" >/dev/null 2>/dev/null
+  [[ ! -e "$stop_marker" ]] || {
+    printf 'FAIL: uninstall stopped NoSleep for a foreign CLI link\n' >&2
+    exit 1
+  }
+  assert_eq /tmp/foreign-nosleep "$(readlink "$home_dir/.local/bin/nosleep")" 'foreign CLI link preserved'
+  assert_eq "$foreign_extension" "$(readlink "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid")" 'foreign extension link preserved'
+
   printf '#!/usr/bin/env bash\necho enable failed >&2\nexit 1\n' >"$fake_bin/gnome-extensions"
   chmod +x "$fake_bin/gnome-extensions"
 

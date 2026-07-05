@@ -26,7 +26,15 @@ remove_owned_link() {
   fi
 }
 
-if [[ -x "$cli_target" ]]; then
+installed_cli_owned() {
+  [[ -L "$installed_cli" && "$(readlink "$installed_cli")" == "$cli_target" ]]
+}
+
+installed_extension_owned() {
+  [[ -L "$installed_extension" && "$(readlink "$installed_extension")" == "$extension_target" ]]
+}
+
+if installed_cli_owned && [[ -x "$cli_target" ]]; then
   if ! stop_output="$("$cli_target" off 2>&1)"; then
     printf 'Warning: could not turn persistent NoSleep off.\n' >&2
     if [[ -n "$stop_output" ]]; then
@@ -36,7 +44,7 @@ if [[ -x "$cli_target" ]]; then
   fi
 fi
 
-if command -v gnome-extensions >/dev/null 2>&1; then
+if installed_extension_owned && command -v gnome-extensions >/dev/null 2>&1; then
   if ! disable_output="$(gnome-extensions disable "$extension_uuid" 2>&1)"; then
     printf 'Warning: could not disable GNOME extension %s.\n' "$extension_uuid" >&2
     if [[ -n "$disable_output" ]]; then
