@@ -11,6 +11,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const UUID = 'nosleep-toggle@systemd-inhibit.local';
 const REFRESH_INTERVAL_SECONDS = 3;
+const MAX_REFRESH_INTERVAL_SECONDS = 30;
 const COMMAND_TIMEOUT_SECONDS = 5;
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
@@ -59,6 +60,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._ctlPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'nosleep']);
         this._state = 'off';
         this._refreshSourceId = 0;
+        this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
         this._refreshInFlight = false;
         this._actionInFlight = false;
         this._destroyed = false;
@@ -67,15 +69,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._buildPanelButton();
         this._buildMenu();
         this._refresh();
-
-        this._refreshSourceId = GLib.timeout_add_seconds(
-            GLib.PRIORITY_DEFAULT,
-            REFRESH_INTERVAL_SECONDS,
-            () => {
-                this._refresh();
-                return GLib.SOURCE_CONTINUE;
-            }
-        );
+        this._scheduleRefresh(REFRESH_INTERVAL_SECONDS);
     }
 
     _buildPanelButton() {
@@ -120,6 +114,21 @@ class NoSleepIndicator extends PanelMenu.Button {
         const iconName = STATES[state]?.icon ?? STATES.off.icon;
         const path = this._extensionDir.get_child('icons').get_child(iconName).get_path();
         return new Gio.FileIcon({file: Gio.File.new_for_path(path)});
+    }
+
+    _scheduleRefresh(delaySeconds) {
+        if (this._destroyed || this._refreshSourceId)
+            return;
+
+        this._refreshSourceId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            delaySeconds,
+            () => {
+                this._refreshSourceId = 0;
+                this._refresh().finally(() => this._scheduleRefresh(this._refreshIntervalSeconds));
+                return GLib.SOURCE_REMOVE;
+            }
+        );
     }
 
     async _runCtl(args, {notify = true} = {}) {
@@ -180,10 +189,13 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._refreshInFlight = true;
         try {
             const state = await this._runCtl(['status'], {notify});
-            if (!this._destroyed && state && STATES[state])
+            if (!this._destroyed && state && STATES[state]) {
                 this._setState(state);
-            else if (!this._destroyed)
+                this._refreshIntervalSeconds = REFRESH_INTERVAL_SECONDS;
+            } else if (!this._destroyed) {
                 this._setState('unknown');
+                this._refreshIntervalSeconds = Math.min(this._refreshIntervalSeconds * 2, MAX_REFRESH_INTERVAL_SECONDS);
+            }
         } finally {
             this._refreshInFlight = false;
         }
