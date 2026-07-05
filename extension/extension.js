@@ -62,6 +62,7 @@ class NoSleepIndicator extends PanelMenu.Button {
         this._refreshInFlight = false;
         this._actionInFlight = false;
         this._destroyed = false;
+        this._activeControls = new Set();
 
         this._buildPanelButton();
         this._buildMenu();
@@ -123,16 +124,19 @@ class NoSleepIndicator extends PanelMenu.Button {
 
     async _runCtl(args, {notify = true} = {}) {
         const cancellable = new Gio.Cancellable();
+        const control = {cancellable, proc: null};
         let proc = null;
         let cancelId = 0;
         let timeoutId = 0;
         let timedOut = false;
 
+        this._activeControls.add(control);
         try {
             proc = Gio.Subprocess.new(
                 [this._ctlPath, ...args],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
             );
+            control.proc = proc;
 
             cancelId = cancellable.connect(() => proc.force_exit());
             timeoutId = GLib.timeout_add_seconds(
@@ -155,7 +159,7 @@ class NoSleepIndicator extends PanelMenu.Button {
 
             return (stdout || '').trim();
         } catch (error) {
-            if (notify) {
+            if (notify && !this._destroyed) {
                 logError(error);
                 Main.notify('NoSleep', timedOut ? 'nosleep timed out' : error.message);
             }
@@ -165,6 +169,7 @@ class NoSleepIndicator extends PanelMenu.Button {
                 GLib.Source.remove(timeoutId);
             if (cancelId)
                 cancellable.disconnect(cancelId);
+            this._activeControls.delete(control);
         }
     }
 
@@ -249,6 +254,13 @@ class NoSleepIndicator extends PanelMenu.Button {
             GLib.Source.remove(this._refreshSourceId);
             this._refreshSourceId = 0;
         }
+
+        for (const control of [...this._activeControls]) {
+            control.cancellable.cancel();
+            if (control.proc)
+                control.proc.force_exit();
+        }
+        this._activeControls.clear();
 
         super.destroy();
     }
