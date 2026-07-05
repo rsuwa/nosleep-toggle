@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,9 +67,11 @@ test_path_poisoning() {
   runtime_dir="$(make_tmp_dir)"
   fake_bin="$(make_tmp_dir)"
   marker="$runtime_dir/path-command-called"
+  printf '#!/bin/sh\ntouch %q\nexec /bin/bash "$@"\n' "$marker" >"$fake_bin/bash"
   printf '#!/usr/bin/env bash\nexit 77\n' >"$fake_bin/systemd-inhibit"
   printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/mkdir"
   printf '#!/usr/bin/env bash\ntouch %q\nexit 77\n' "$marker" >"$fake_bin/chmod"
+  chmod +x "$fake_bin/bash"
   chmod +x "$fake_bin/systemd-inhibit"
   chmod +x "$fake_bin/mkdir" "$fake_bin/chmod"
 

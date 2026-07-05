@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

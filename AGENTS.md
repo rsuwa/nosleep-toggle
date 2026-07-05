@@ -27,7 +27,7 @@ There is no build step. Development usually happens directly from the checked-ou
 
 ## Coding Style & Naming Conventions
 
-Bash files use `#!/usr/bin/env bash`, `set -euo pipefail`, two-space indentation, `snake_case` function names, and `local` variables inside functions. Keep CLI output stable because the extension parses `nosleep status`.
+Bash files use `#!/bin/bash`, `set -euo pipefail`, two-space indentation, `snake_case` function names, and `local` variables inside functions. Keep CLI output stable because the extension parses `nosleep status`.
 Internal helper commands are resolved from trusted system paths in `bin/nosleep`; keep user command execution via `nosleep run` using the caller's original `PATH`.
 Separate `systemd-inhibit` options from the inhibited command with `--`.
 Persistent state uses pid, process start time, and boot ID files under the runtime state directory; keep writes atomic and cleanup under the CLI lock.
