@@ -26,6 +26,8 @@ cd nosleep-toggle
 
 The installer creates symlinks into this checkout.
 Keep the cloned repository in place after installation.
+Because the installed CLI and extension are symlinks, later edits, branch changes, or `git pull` in this checkout immediately affect the installed behavior.
+Install only from a checkout you control.
 
 If GNOME Shell does not detect the new extension immediately, log out and log back in.
 
