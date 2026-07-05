@@ -61,7 +61,8 @@ nosleep status
 ```
 
 `nosleep status` prints `off`, `on`, or `running`.
-`nosleep --status` prints the raw `systemd-inhibit` list for troubleshooting.
+`nosleep --raw-status` prints the raw global `systemd-inhibit` list for troubleshooting.
+The older `nosleep --status` alias is still accepted.
 
 Use the same `nosleep` command to inhibit sleep only while a command runs:
 

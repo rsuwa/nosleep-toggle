@@ -81,6 +81,7 @@ Usage:
   nosleep shell           Start an inhibited shell. Type "exit" to release.
   nosleep run <command>   Run a command while sleep is blocked.
   nosleep <command> [...] Shortcut for "nosleep run <command> [...]".
+  nosleep --raw-status    Print the raw global systemd-inhibit list.
 
 Examples:
   nosleep on
@@ -447,7 +448,7 @@ case "$command" in
   -h|--help|help)
     usage
     ;;
-  --status)
+  --status|--raw-status)
     exec "$systemd_inhibit_cmd" --list --no-pager
     ;;
   "")

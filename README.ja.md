@@ -61,7 +61,8 @@ nosleep status
 ```
 
 `nosleep status` は `off`、`on`、`running` のいずれかを出力します。
-`nosleep --status` は、トラブルシュート用に生の `systemd-inhibit` 一覧を出力します。
+`nosleep --raw-status` は、トラブルシュート用にシステム全体の生の `systemd-inhibit` 一覧を出力します。
+古い `nosleep --status` も引き続き使えます。
 
 コマンド実行中だけ抑止したい場合も、同じ `nosleep` を使います。
 
