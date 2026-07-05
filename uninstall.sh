@@ -23,8 +23,14 @@ remove_owned_link() {
   fi
 }
 
-if [[ -L "$installed_cli" && "$(readlink "$installed_cli")" == "$cli_target" ]]; then
-  "$installed_cli" off >/dev/null 2>&1 || true
+if [[ -x "$cli_target" ]]; then
+  if ! stop_output="$("$cli_target" off 2>&1)"; then
+    printf 'Warning: could not turn persistent NoSleep off.\n' >&2
+    if [[ -n "$stop_output" ]]; then
+      printf '%s\n' "$stop_output" >&2
+    fi
+    exit 1
+  fi
 fi
 
 if command -v gnome-extensions >/dev/null 2>&1; then
