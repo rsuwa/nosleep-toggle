@@ -107,7 +107,8 @@ FAKE_INHIBIT
 }
 
 test_cli_state() {
-  local fake_bin runtime_dir pid spoof_pid target_pid spoof_who proc_stat fields
+  local blocker_pid cli_pid counter fake_bin fields pid proc_stat real_inhibit runtime_dir
+  local spoof_pid spoof_who target_pid
 
   if systemd-inhibit --list --no-pager --no-legend 2>/dev/null | grep -F 'nosleep:' >/dev/null; then
     printf 'SKIP: CLI state test skipped because a nosleep inhibitor is already active\n'
@@ -184,6 +185,56 @@ FAKE_INHIBIT
   )" 'status ignores recorded process without logind inhibitor'
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+
+  runtime_dir="$(make_tmp_dir)"
+  fake_bin="$(make_tmp_dir)"
+  counter="$runtime_dir/list-count"
+  real_inhibit="$(command -v systemd-inhibit)"
+  cat >"$fake_bin/systemd-inhibit" <<FAKE_INHIBIT
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--list" ]]; then
+  count=0
+  [[ -r "$counter" ]] && count=\$(<"$counter")
+  count=\$((count + 1))
+  printf '%s\\n' "\$count" >"$counter"
+  if [[ "\$count" -eq 1 ]]; then
+    exit 0
+  fi
+  sleep 5
+  exit 0
+fi
+exec "$real_inhibit" "\$@"
+FAKE_INHIBIT
+  chmod +x "$fake_bin/systemd-inhibit"
+  NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    XDG_RUNTIME_DIR="$runtime_dir" \
+    setsid "$repo_root/bin/nosleep" on >/dev/null 2>/dev/null &
+  cli_pid="$!"
+  run_pids+=("$cli_pid")
+  blocker_pid=""
+  for _ in {1..30}; do
+    if [[ -r "$runtime_dir/nosleep/inhibit.pid" ]]; then
+      blocker_pid="$(<"$runtime_dir/nosleep/inhibit.pid")"
+      break
+    fi
+    sleep 0.1
+  done
+  [[ -n "$blocker_pid" ]] || {
+    printf 'FAIL: interrupted start did not write a blocker pid\n' >&2
+    exit 1
+  }
+  blocker_pids+=("$blocker_pid")
+  kill -TERM -- "-$cli_pid" 2>/dev/null || kill -TERM "$cli_pid" 2>/dev/null || true
+  wait "$cli_pid" 2>/dev/null || true
+  sleep 0.3
+  if kill -0 "$blocker_pid" 2>/dev/null; then
+    printf 'FAIL: interrupted start left blocker running\n' >&2
+    exit 1
+  fi
+  if compgen -G "$runtime_dir/nosleep/inhibit.*" >/dev/null; then
+    printf 'FAIL: interrupted start left state files\n' >&2
+    exit 1
+  fi
 
   assert_eq on "$(XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" on)" 'turn on'
   pid="$(<"$runtime_dir/nosleep/inhibit.pid")"

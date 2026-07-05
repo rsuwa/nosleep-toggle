@@ -381,6 +381,17 @@ stop_started_blocker() {
   kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
 }
 
+cleanup_started_blocker() {
+  local pid="$1"
+
+  [[ "${cleanup_new_blocker:-0}" -eq 1 ]] || return 0
+  cleanup_new_blocker=0
+  stop_started_blocker "$pid"
+  "$rm_cmd" -f \
+    "$pid_file" "$start_file" "$boot_file" \
+    "$pid_file".tmp.* "$start_file".tmp.* "$boot_file".tmp.*
+}
+
 start_blocker() {
   local pid start_time boot_id cleanup_new_blocker
 
@@ -403,7 +414,10 @@ start_blocker() {
 
   pid="$!"
   cleanup_new_blocker=1
-  trap 'if [[ "${cleanup_new_blocker:-0}" -eq 1 ]]; then stop_started_blocker "$pid"; "$rm_cmd" -f "$pid_file" "$start_file" "$boot_file" "$pid_file".tmp.* "$start_file".tmp.* "$boot_file".tmp.*; fi' RETURN
+  trap 'cleanup_started_blocker "$pid"' RETURN EXIT
+  trap 'cleanup_started_blocker "$pid"; exit 129' HUP
+  trap 'cleanup_started_blocker "$pid"; exit 130' INT
+  trap 'cleanup_started_blocker "$pid"; exit 143' TERM
 
   start_time="$(process_start_time "$pid")" || {
     printf 'failed to inspect systemd-inhibit process\n' >&2
@@ -432,7 +446,7 @@ start_blocker() {
   fi
 
   cleanup_new_blocker=0
-  trap - RETURN
+  trap - RETURN EXIT HUP INT TERM
   printf 'on\n'
 }
 
