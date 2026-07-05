@@ -10,6 +10,7 @@ This repository provides a Bash CLI plus a GNOME Shell extension for toggling sl
 - `extension/icons/`: symbolic SVG status icons named by state.
 - `install.sh` and `uninstall.sh`: symlink the CLI and extension into the user's local GNOME paths; uninstall only stops/disables links owned by this checkout.
 - `tests/run.sh`: Bash smoke/regression test script for CLI lifecycle, adversarial inhibitor parsing, installer, metadata, and icon contracts.
+- `package.json`, `package-lock.json`, and `eslint.config.mjs`: pinned JavaScript lint tooling for the GNOME Shell extension.
 - `README.md` and `README.ja.md`: user-facing documentation.
 - `.serena/memories/`: local Serena project notes. Keep them aligned with stable repository contracts after behavior changes.
 
@@ -43,6 +44,8 @@ Fallback list-based `off` must stop all matching persistent blockers, not only t
 If `nosleep on` is interrupted before validation completes, clean up the just-started blocker and any partial state files on return, exit, and common termination signals.
 
 GNOME Shell JavaScript uses ES modules, four-space indentation, `const` for immutable values, `UPPER_CASE` constants, and private helper methods with a leading underscore. Keep CLI-backed state keys aligned with the CLI status values: `off`, `on`, and `running`; the extension also has internal `loading` and `unknown` states.
+JavaScript linting is enforced through the repository ESLint v9 flat config; keep extension code compatible with `npm run lint:js`.
+Keep repeated panel style fragments centralized through the local style helper instead of duplicating state-specific CSS strings.
 The extension should not present or act on a false `off` state before the first status refresh completes; guard toggles until initial status is loaded.
 Track in-flight subprocesses from `destroy()`.
 Launch CLI controls in their own session/process group, cancel them by signaling the process group with SIGTERM first, and use delayed SIGKILL/`force_exit()` only as a fallback.
@@ -52,7 +55,7 @@ Icon assets should remain symbolic SVGs named `nosleep-<state>-symbolic.svg`.
 
 ## Testing Guidelines
 
-Before opening a pull request, run `./tests/run.sh`, the Bash syntax check, and ShellCheck when available. On Ubuntu 24.04 with GNOME Shell 46, run `./install.sh`, then verify the top-bar states: `Sleep`, `Awake`, `Run`, and the error/unknown path if the helper is unavailable. Also test `nosleep on`, `nosleep off`, `nosleep toggle`, `nosleep status`, `nosleep --raw-status`, and `nosleep run <command>`.
+Before opening a pull request, run `./tests/run.sh`, `npm run lint:js`, the Bash syntax check, and ShellCheck when available. On Ubuntu 24.04 with GNOME Shell 46, run `./install.sh`, then verify the top-bar states: `Sleep`, `Awake`, `Run`, and the error/unknown path if the helper is unavailable. Also test `nosleep on`, `nosleep off`, `nosleep toggle`, `nosleep status`, `nosleep --raw-status`, and `nosleep run <command>`.
 For process-detection changes, include regression coverage for spoofed `--who` values with whitespace, pid files that point at a process without a logind inhibitor, successful inhibitor-list queries that miss a recorded blocker, and duplicate matching persistent inhibitors.
 For lifecycle changes, include coverage that interrupted `nosleep on` does not leave a blocker or partial state files.
 For locking/state-directory changes, include coverage that a preexisting `lock` symlink is not opened or truncated and that a symlink runtime state directory is rejected.
