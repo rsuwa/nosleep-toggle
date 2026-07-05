@@ -40,6 +40,14 @@ const STATES = {
         accessible: 'NoSleep Toggle Running',
         style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(245, 169, 71, 0.22); border: 1px solid rgba(245, 169, 71, 0.52);',
     },
+    unknown: {
+        icon: 'nosleep-off-symbolic.svg',
+        label: 'Error',
+        status: 'NoSleep: Status unknown',
+        toggle: 'Retry',
+        accessible: 'NoSleep Toggle Unknown',
+        style: 'spacing: 5px; padding: 0 7px; margin: 2px 0; border-radius: 999px; background-color: rgba(226, 82, 82, 0.22); border: 1px solid rgba(226, 82, 82, 0.52);',
+    },
 };
 
 const NoSleepIndicator = GObject.registerClass(
@@ -160,15 +168,17 @@ class NoSleepIndicator extends PanelMenu.Button {
         }
     }
 
-    async _refresh() {
+    async _refresh({notify = false} = {}) {
         if (this._refreshInFlight)
             return;
 
         this._refreshInFlight = true;
         try {
-            const state = await this._runCtl(['status'], {notify: false});
+            const state = await this._runCtl(['status'], {notify});
             if (!this._destroyed && state && STATES[state])
                 this._setState(state);
+            else if (!this._destroyed)
+                this._setState('unknown');
         } finally {
             this._refreshInFlight = false;
         }
@@ -179,8 +189,13 @@ class NoSleepIndicator extends PanelMenu.Button {
             return;
 
         this._actionInFlight = true;
-        const command = this._state === 'on' ? 'off' : 'on';
         try {
+            if (this._state === 'unknown') {
+                await this._refresh({notify: true});
+                return;
+            }
+
+            const command = this._state === 'on' ? 'off' : 'on';
             const state = await this._runCtl([command]);
             if (this._destroyed)
                 return;
@@ -194,6 +209,8 @@ class NoSleepIndicator extends PanelMenu.Button {
             } else if (state === 'running') {
                 this._setState('running');
                 Main.notify('NoSleep', 'Sleep is still blocked while a command is running.');
+            } else {
+                this._setState('unknown');
             }
         } finally {
             this._actionInFlight = false;
