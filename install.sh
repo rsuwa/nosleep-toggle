@@ -20,9 +20,10 @@ done
 
 backup_path() {
   local link="$1"
-  local backup
+  local backup_dir backup
 
-  backup="${link}.bak.$(date +%Y%m%d%H%M%S)"
+  backup_dir="$(mktemp -d "${link}.bak.$(date +%Y%m%d%H%M%S).XXXXXX")"
+  backup="$backup_dir/$(basename "$link")"
 
   mv "$link" "$backup"
   printf 'Backed up %s to %s\n' "$link" "$backup"

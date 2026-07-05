@@ -131,7 +131,7 @@ test_install_uninstall() {
 
   HOME="$home_dir" PATH="$fake_bin:$PATH" "$repo_root/install.sh" >/dev/null 2>/dev/null
   assert_eq "$repo_root/bin/nosleep" "$(readlink "$home_dir/.local/bin/nosleep")" 'installed CLI link'
-  compgen -G "$home_dir/.local/bin/nosleep.bak.*" >/dev/null || {
+  compgen -G "$home_dir/.local/bin/nosleep.bak.*/nosleep" >/dev/null || {
     printf 'FAIL: install did not back up foreign symlink\n' >&2
     exit 1
   }
