@@ -85,8 +85,12 @@ npm run lint:js
 ./tests/run.sh
 ```
 
+lint ツール（ESLint 9）には Node.js 18.18 以降（`^18.18.0 || ^20.9.0 || >=21.1.0`）が必要です。
+Ubuntu 22.04 の apt 版 Node.js 12 は古すぎて動かないため、nvm などで新しい Node.js を使ってください。
+nosleep-toggle を使うだけなら Node.js は不要です。
+
 テストスクリプトは、一時的なランタイムディレクトリとホームディレクトリを使います。
-npm 依存関係がインストール済みの場合は、JavaScript lint も実行します。
+npm 依存関係がインストール済みで Node.js が十分新しい場合は JavaScript lint も実行し、そうでない場合は理由を表示してそのステップをスキップします。
 別の `nosleep` inhibitor がすでに有効な場合、CLI 状態テストはスキップします。
 
 ## 注意

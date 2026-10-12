@@ -85,8 +85,12 @@ npm run lint:js
 ./tests/run.sh
 ```
 
+The lint tooling (ESLint 9) needs Node.js 18.18 or newer (`^18.18.0 || ^20.9.0 || >=21.1.0`).
+Ubuntu 22.04's packaged Node.js 12 is too old; use a newer Node.js there, for example via nvm.
+Using nosleep-toggle itself does not require Node.js.
+
 The test script uses temporary runtime and home directories.
-When npm dependencies are installed, it also runs the JavaScript lint check.
+When npm dependencies are installed and Node.js is new enough, it also runs the JavaScript lint check; otherwise it skips that step and says why.
 It skips the CLI state test if another `nosleep` inhibitor is already active.
 
 ## Safety
