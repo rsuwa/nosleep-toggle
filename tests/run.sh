@@ -809,6 +809,419 @@ FAKE_GNOME_EXTENSIONS
   }
 }
 
+installer_uuid="nosleep-toggle@systemd-inhibit.local"
+installer_extension_root=".local/share/gnome-shell/extensions"
+installer_extension_link="$installer_extension_root/$installer_uuid"
+
+# Writes a fake gnome-shell that prints VERSION_LINE on stdout.
+write_fake_gnome_shell() {
+  local path="$1"
+  local version_line="$2"
+
+  printf '#!/bin/bash\nprintf "%%s\\n" %q\n' "$version_line" >"$path"
+  chmod +x "$path"
+}
+
+# Creates the fake commands the installer variant tests share in DIR:
+# gnome-extensions logs its arguments to DIR/gnome-extensions.log,
+# gnome-extensions-fail also fails "enable" the way a running Shell does for an
+# extension it has not scanned yet, and systemd-inhibit logs its arguments to
+# DIR/systemd-inhibit.log and reports no inhibitors, so the `nosleep off`
+# issued by uninstall.sh never reaches logind.
+make_installer_fakes() {
+  local dir="$1"
+
+  cat >"$dir/gnome-extensions" <<'FAKE_GNOME_EXTENSIONS'
+#!/bin/bash
+printf '%s\n' "$*" >>"${0%/*}/gnome-extensions.log"
+FAKE_GNOME_EXTENSIONS
+  cat >"$dir/gnome-extensions-fail" <<'FAKE_GNOME_EXTENSIONS'
+#!/bin/bash
+printf '%s\n' "$*" >>"${0%/*}/gnome-extensions.log"
+if [[ "${1:-}" == "enable" ]]; then
+  printf 'Extension does not exist\n' >&2
+  exit 2
+fi
+FAKE_GNOME_EXTENSIONS
+  cat >"$dir/systemd-inhibit" <<'FAKE_INHIBIT'
+#!/bin/bash
+printf '%s\n' "$*" >>"${0%/*}/systemd-inhibit.log"
+if [[ "${1:-}" == "--list" ]]; then
+  exit 0
+fi
+exit 77
+FAKE_INHIBIT
+  chmod +x "$dir/gnome-extensions" "$dir/gnome-extensions-fail" "$dir/systemd-inhibit"
+  write_fake_gnome_shell "$dir/gnome-shell-42" 'GNOME Shell 42.9'
+  write_fake_gnome_shell "$dir/gnome-shell-46" 'GNOME Shell 46.0'
+}
+
+# run_install HOME GNOME_SHELL_CMD GNOME_EXTENSIONS_CMD
+# Prints the combined output of install.sh. Both commands are mandatory: an
+# empty value would make install.sh fall back to the host's GNOME Shell and
+# gnome-extensions.
+run_install() {
+  local home_dir="$1"
+  local shell_cmd="$2"
+  local extensions_cmd="$3"
+  local output
+
+  [[ -n "$shell_cmd" && -n "$extensions_cmd" ]] || {
+    printf 'FAIL: installer test does not pin the GNOME commands\n' >&2
+    exit 1
+  }
+
+  if ! output="$(HOME="$home_dir" \
+    NOSLEEP_GNOME_SHELL_CMD="$shell_cmd" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$extensions_cmd" \
+    "$repo_root/install.sh" 2>&1)"; then
+    printf 'FAIL: install.sh failed with %s:\n%s\n' "${shell_cmd##*/}" "$output" >&2
+    exit 1
+  fi
+  printf '%s\n' "$output"
+}
+
+# run_uninstall HOME FAKE_BIN
+# Uses the fake systemd-inhibit and gnome-extensions from FAKE_BIN.
+run_uninstall() {
+  local home_dir="$1"
+  local fake_bin="$2"
+  local output
+
+  mkdir -p "$home_dir/runtime"
+  if ! output="$(HOME="$home_dir" XDG_RUNTIME_DIR="$home_dir/runtime" \
+    NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    "$repo_root/uninstall.sh" 2>&1)"; then
+    printf 'FAIL: uninstall.sh failed:\n%s\n' "$output" >&2
+    exit 1
+  fi
+}
+
+assert_output_contains() {
+  local output="$1"
+  local fragment="$2"
+  local label="$3"
+
+  grep -F -e "$fragment" <<<"$output" >/dev/null || {
+    printf 'FAIL: %s: output lacks "%s":\n%s\n' "$label" "$fragment" "$output" >&2
+    exit 1
+  }
+}
+
+assert_output_lacks() {
+  local output="$1"
+  local fragment="$2"
+  local label="$3"
+
+  if grep -F -e "$fragment" <<<"$output" >/dev/null; then
+    printf 'FAIL: %s: output contains "%s":\n%s\n' "$label" "$fragment" "$output" >&2
+    exit 1
+  fi
+}
+
+assert_no_path() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -e "$path" || -L "$path" ]]; then
+    printf 'FAIL: %s: %s exists\n' "$label" "$path" >&2
+    exit 1
+  fi
+}
+
+# The extensions directory must hold the extension link and nothing else:
+# GNOME Shell tries to load every entry, including *.bak.* backups.
+assert_only_extension_link() {
+  local home_dir="$1"
+  local label="$2"
+
+  assert_eq "$installer_uuid" \
+    "$(find "$home_dir/$installer_extension_root" -mindepth 1 -maxdepth 1 -printf '%f\n')" \
+    "$label"
+}
+
+test_install_variant_selection() {
+  local fake_bin home_dir incomplete_checkout major output root unsupported variant version
+  local -a majors
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  mkdir -p "$fake_bin"
+  make_installer_fakes "$fake_bin"
+
+  # Every Shell major a variant declares must make install.sh pick that variant.
+  for variant in extension extension-legacy; do
+    mapfile -t majors < <(sed -n 's/.*"shell-version": *\[\(.*\)\].*/\1/p' "$repo_root/$variant/metadata.json" |
+      tr -d '" ' | tr ',' '\n')
+    [[ "${#majors[@]}" -gt 0 ]] || {
+      printf 'FAIL: no shell-version found in %s/metadata.json\n' "$variant" >&2
+      exit 1
+    }
+
+    for major in "${majors[@]}"; do
+      home_dir="$root/home-$variant-$major"
+      mkdir -p "$home_dir"
+      write_fake_gnome_shell "$fake_bin/gnome-shell-declared" "GNOME Shell $major.9"
+      output="$(run_install "$home_dir" "$fake_bin/gnome-shell-declared" "$fake_bin/gnome-extensions")"
+      assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link for declared GNOME Shell $major"
+      assert_eq "$repo_root/bin/nosleep" "$(readlink "$home_dir/.local/bin/nosleep")" "CLI link for declared GNOME Shell $major"
+      assert_output_lacks "$output" 'not a supported version' "install for declared GNOME Shell $major"
+    done
+  done
+
+  # Undeclared majors still get the variant their loader needs, with a warning.
+  for unsupported in '3.36.9|extension-legacy' '44.9|extension-legacy' '45.0|extension' '47.alpha|extension'; do
+    version="${unsupported%%|*}"
+    variant="${unsupported#*|}"
+    home_dir="$root/home-unsupported-$version"
+    mkdir -p "$home_dir"
+    write_fake_gnome_shell "$fake_bin/gnome-shell-undeclared" "GNOME Shell $version"
+    output="$(run_install "$home_dir" "$fake_bin/gnome-shell-undeclared" "$fake_bin/gnome-extensions")"
+    assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link for GNOME Shell $version"
+    assert_output_contains "$output" 'not a supported version' "install for GNOME Shell $version"
+  done
+
+  # Only stdout of `gnome-shell --version` counts, and it is read with LC_ALL=C.
+  home_dir="$root/home-stdout-only"
+  mkdir -p "$home_dir"
+  cat >"$fake_bin/gnome-shell-noisy" <<'FAKE_GNOME_SHELL'
+#!/bin/bash
+printf 'GNOME Shell 46.0\n' >&2
+[[ "${1:-}" == "--version" && "${LC_ALL:-}" == "C" ]] || exit 1
+printf 'GNOME Shell 42.9\n'
+FAKE_GNOME_SHELL
+  chmod +x "$fake_bin/gnome-shell-noisy"
+  run_install "$home_dir" "$fake_bin/gnome-shell-noisy" "$fake_bin/gnome-extensions" >/dev/null
+  assert_eq "$repo_root/extension-legacy" "$(readlink "$home_dir/$installer_extension_link")" 'extension link from gnome-shell stdout'
+
+  # The variant is decided before any link is created: a checkout without the
+  # variant it needs installs nothing, not even the CLI link.
+  home_dir="$root/home-incomplete-checkout"
+  incomplete_checkout="$root/incomplete-checkout"
+  mkdir -p "$home_dir" "$incomplete_checkout/bin"
+  cp "$repo_root/install.sh" "$incomplete_checkout/install.sh"
+  cp "$repo_root/bin/nosleep" "$incomplete_checkout/bin/nosleep"
+  cp -R "$repo_root/extension" "$incomplete_checkout/extension"
+  if HOME="$home_dir" \
+    NOSLEEP_GNOME_SHELL_CMD="$fake_bin/gnome-shell-42" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    "$incomplete_checkout/install.sh" >/dev/null 2>&1; then
+    printf 'FAIL: install succeeded without the extension variant it needs\n' >&2
+    exit 1
+  fi
+  assert_no_path "$home_dir/.local" 'install from a checkout without extension-legacy'
+}
+
+test_install_undetectable_shell() {
+  local fake_bin home_dir output root shell_cmd
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  mkdir -p "$fake_bin" "$root/foreign-extension"
+  make_installer_fakes "$fake_bin"
+  write_fake_gnome_shell "$fake_bin/gnome-shell-unparsable" 'mutter 42.9'
+  printf '#!/bin/bash\nprintf "GNOME Shell 42.9\\n"\nexit 1\n' >"$fake_bin/gnome-shell-failing"
+  printf '#!/bin/bash\nprintf "GNOME Shell 42.9\\n" >&2\n' >"$fake_bin/gnome-shell-stderr"
+  chmod +x "$fake_bin/gnome-shell-failing" "$fake_bin/gnome-shell-stderr"
+
+  # gnome-shell-missing does not exist.
+  for shell_cmd in gnome-shell-unparsable gnome-shell-failing gnome-shell-stderr gnome-shell-missing; do
+    home_dir="$root/home-$shell_cmd"
+    mkdir -p "$home_dir"
+    output="$(run_install "$home_dir" "$fake_bin/$shell_cmd" "$fake_bin/gnome-extensions")"
+    assert_eq "$repo_root/bin/nosleep" "$(readlink "$home_dir/.local/bin/nosleep")" "CLI link with $shell_cmd"
+    assert_no_path "$home_dir/$installer_extension_link" "install with $shell_cmd"
+    assert_output_contains "$output" 'NOSLEEP_GNOME_SHELL_CMD' "install with $shell_cmd"
+    assert_no_path "$fake_bin/gnome-extensions.log" "gnome-extensions calls with $shell_cmd"
+  done
+
+  # An existing extension link is left alone as well, owned or not.
+  home_dir="$root/home-existing-owned"
+  mkdir -p "$home_dir"
+  run_install "$home_dir" "$fake_bin/gnome-shell-42" "$fake_bin/gnome-extensions" >/dev/null
+  rm -f "$fake_bin/gnome-extensions.log"
+  run_install "$home_dir" "$fake_bin/gnome-shell-unparsable" "$fake_bin/gnome-extensions" >/dev/null
+  assert_eq "$repo_root/extension-legacy" "$(readlink "$home_dir/$installer_extension_link")" 'owned extension link without a detectable Shell'
+
+  home_dir="$root/home-existing-foreign"
+  mkdir -p "$home_dir/$installer_extension_root"
+  ln -s "$root/foreign-extension" "$home_dir/$installer_extension_link"
+  run_install "$home_dir" "$fake_bin/gnome-shell-unparsable" "$fake_bin/gnome-extensions" >/dev/null
+  assert_eq "$root/foreign-extension" "$(readlink "$home_dir/$installer_extension_link")" 'foreign extension link without a detectable Shell'
+  assert_only_extension_link "$home_dir" 'extensions directory without a detectable Shell'
+
+  assert_no_path "$fake_bin/gnome-extensions.log" 'gnome-extensions calls without a detectable Shell'
+}
+
+test_install_variant_switch() {
+  local fake_bin home_dir root shell_major step variant
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  home_dir="$root/home"
+  mkdir -p "$fake_bin" "$home_dir"
+  make_installer_fakes "$fake_bin"
+
+  # A link to the other variant of this checkout is switched in place.
+  for step in '42|extension-legacy' '46|extension' '42|extension-legacy' '46|extension'; do
+    shell_major="${step%%|*}"
+    variant="${step#*|}"
+    run_install "$home_dir" "$fake_bin/gnome-shell-$shell_major" "$fake_bin/gnome-extensions" >/dev/null
+    assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link after switching to GNOME Shell $shell_major"
+    assert_only_extension_link "$home_dir" "extensions directory after switching to GNOME Shell $shell_major"
+  done
+
+  assert_eq nosleep "$(find "$home_dir/.local/bin" -mindepth 1 -maxdepth 1 -printf '%f\n')" 'CLI directory after switching variants'
+}
+
+test_install_foreign_extension_links() {
+  local backup fake_bin foreign home_dir index other_checkout root shell_major step variant
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  other_checkout="$root/other-checkout"
+  mkdir -p "$fake_bin" "$root/foreign-extension" "$other_checkout/extension" "$other_checkout/extension-legacy"
+  make_installer_fakes "$fake_bin"
+
+  # Links that are not owned by this checkout are backed up, including links
+  # to the variant directories of another checkout.
+  index=0
+  for step in '42|extension-legacy' '46|extension'; do
+    shell_major="${step%%|*}"
+    variant="${step#*|}"
+    for foreign in "$root/foreign-extension" "$other_checkout/extension" "$other_checkout/extension-legacy"; do
+      index=$((index + 1))
+      home_dir="$root/home-link-$index"
+      mkdir -p "$home_dir/$installer_extension_root"
+      ln -s "$foreign" "$home_dir/$installer_extension_link"
+      run_install "$home_dir" "$fake_bin/gnome-shell-$shell_major" "$fake_bin/gnome-extensions" >/dev/null
+      assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link replacing ${foreign#"$root"/}"
+      backup="$(compgen -G "$home_dir/$installer_extension_link.bak.*/$installer_uuid")" || {
+        printf 'FAIL: install did not back up the link to %s\n' "${foreign#"$root"/}" >&2
+        exit 1
+      }
+      assert_eq "$foreign" "$(readlink "$backup")" "backup of the link to ${foreign#"$root"/}"
+    done
+  done
+
+  # A real directory in the way is backed up too.
+  home_dir="$root/home-directory"
+  mkdir -p "$home_dir/$installer_extension_link"
+  touch "$home_dir/$installer_extension_link/metadata.json"
+  run_install "$home_dir" "$fake_bin/gnome-shell-42" "$fake_bin/gnome-extensions" >/dev/null
+  assert_eq "$repo_root/extension-legacy" "$(readlink "$home_dir/$installer_extension_link")" 'extension link replacing a directory'
+  compgen -G "$home_dir/$installer_extension_link.bak.*/$installer_uuid/metadata.json" >/dev/null || {
+    printf 'FAIL: install did not back up a foreign extension directory\n' >&2
+    exit 1
+  }
+}
+
+test_uninstall_variant_ownership() {
+  local fake_bin foreign home_dir index other_checkout root shell_major step variant
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  other_checkout="$root/other-checkout"
+  mkdir -p "$fake_bin" "$root/foreign-extension" "$other_checkout/extension" "$other_checkout/extension-legacy"
+  make_installer_fakes "$fake_bin"
+
+  # A link to either variant of this checkout is owned: disabled and removed.
+  for step in '42|extension-legacy' '46|extension'; do
+    shell_major="${step%%|*}"
+    variant="${step#*|}"
+    home_dir="$root/home-owned-$variant"
+    mkdir -p "$home_dir"
+    run_install "$home_dir" "$fake_bin/gnome-shell-$shell_major" "$fake_bin/gnome-extensions" >/dev/null
+    assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "installed $variant link"
+    rm -f "$fake_bin/gnome-extensions.log" "$fake_bin/systemd-inhibit.log"
+    run_uninstall "$home_dir" "$fake_bin"
+    assert_no_path "$home_dir/$installer_extension_link" "uninstall of the $variant link"
+    assert_no_path "$home_dir/.local/bin/nosleep" "uninstall of the CLI link next to $variant"
+    assert_eq "disable $installer_uuid" "$(cat "$fake_bin/gnome-extensions.log")" "gnome-extensions calls when uninstalling $variant"
+    [[ -s "$fake_bin/systemd-inhibit.log" ]] || {
+      printf 'FAIL: uninstall of the %s link did not stop NoSleep through the fake systemd-inhibit\n' "$variant" >&2
+      exit 1
+    }
+  done
+
+  # Foreign links and links into another checkout are neither disabled nor removed.
+  rm -f "$fake_bin/gnome-extensions.log"
+  index=0
+  for foreign in "$root/foreign-extension" "$other_checkout/extension" "$other_checkout/extension-legacy"; do
+    index=$((index + 1))
+    home_dir="$root/home-foreign-$index"
+    mkdir -p "$home_dir/$installer_extension_root"
+    ln -s "$foreign" "$home_dir/$installer_extension_link"
+    run_uninstall "$home_dir" "$fake_bin"
+    assert_eq "$foreign" "$(readlink "$home_dir/$installer_extension_link")" "uninstall preserves the link to ${foreign#"$root"/}"
+  done
+  assert_no_path "$fake_bin/gnome-extensions.log" 'gnome-extensions calls for links not owned by this checkout'
+}
+
+test_install_guidance() {
+  local enable_line enable_step fake_bin home_dir output restart_line restart_step root run
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  mkdir -p "$fake_bin"
+  make_installer_fakes "$fake_bin"
+  restart_step='Restart GNOME Shell'
+  enable_step="gnome-extensions enable $installer_uuid"
+
+  # A failed enable needs both steps in order, also when the link is unchanged:
+  # nothing was recorded, so the extension stays disabled after the restart.
+  home_dir="$root/home-enable-fails"
+  mkdir -p "$home_dir"
+  for run in first unchanged; do
+    output="$(run_install "$home_dir" "$fake_bin/gnome-shell-42" "$fake_bin/gnome-extensions-fail")"
+    assert_output_contains "$output" "$restart_step" "$run install with a failing enable"
+    assert_output_contains "$output" "$enable_step" "$run install with a failing enable"
+    assert_output_lacks "$output" 'Try:' "$run install with a failing enable"
+    restart_line="$(grep -n -m 1 -F -e "$restart_step" <<<"$output")"
+    enable_line="$(grep -n -m 1 -F -e "$enable_step" <<<"$output")"
+    [[ "${restart_line%%:*}" -lt "${enable_line%%:*}" ]] || {
+      printf 'FAIL: %s install with a failing enable: restart step is not first:\n%s\n' "$run" "$output" >&2
+      exit 1
+    }
+  done
+
+  # Without any gnome-extensions command the extension is not enabled either.
+  home_dir="$root/home-no-gnome-extensions"
+  mkdir -p "$home_dir"
+  for run in first unchanged; do
+    output="$(run_install "$home_dir" "$fake_bin/gnome-shell-46" "$fake_bin/gnome-extensions-missing")"
+    assert_eq "$repo_root/extension" "$(readlink "$home_dir/$installer_extension_link")" "$run install without gnome-extensions"
+    assert_output_contains "$output" 'gnome-extensions was not found' "$run install without gnome-extensions"
+    assert_output_contains "$output" "$restart_step" "$run install without gnome-extensions"
+    assert_output_contains "$output" "$enable_step" "$run install without gnome-extensions"
+  done
+
+  # A new or changed link with a successful enable only needs the restart.
+  home_dir="$root/home-enable-works"
+  mkdir -p "$home_dir"
+  output="$(run_install "$home_dir" "$fake_bin/gnome-shell-42" "$fake_bin/gnome-extensions")"
+  assert_output_contains "$output" "$restart_step" 'first install with a working enable'
+  assert_output_lacks "$output" "$enable_step" 'first install with a working enable'
+
+  output="$(run_install "$home_dir" "$fake_bin/gnome-shell-42" "$fake_bin/gnome-extensions")"
+  assert_output_lacks "$output" "$restart_step" 'unchanged install with a working enable'
+  assert_output_lacks "$output" "$enable_step" 'unchanged install with a working enable'
+
+  output="$(run_install "$home_dir" "$fake_bin/gnome-shell-46" "$fake_bin/gnome-extensions")"
+  assert_output_contains "$output" "$restart_step" 'variant switch with a working enable'
+  assert_output_lacks "$output" "$enable_step" 'variant switch with a working enable'
+}
+
+# Enabling stays with gnome-extensions: with a mismatched HOME and session bus,
+# writing org.gnome.shell settings could clobber the real enabled list.
+test_installer_leaves_shell_settings_alone() {
+  if grep -n -E 'gsettings|dconf' "$repo_root/install.sh" "$repo_root/uninstall.sh" >&2; then
+    printf 'FAIL: installer scripts must not touch GNOME Shell settings\n' >&2
+    exit 1
+  fi
+}
+
 test_syntax
 test_js_lint
 test_status_list_failure
@@ -820,5 +1233,12 @@ test_cli_state
 test_extension_metadata
 test_extension_variants
 test_install_uninstall
+test_install_variant_selection
+test_install_undetectable_shell
+test_install_variant_switch
+test_install_foreign_extension_links
+test_uninstall_variant_ownership
+test_install_guidance
+test_installer_leaves_shell_settings_alone
 
 printf 'All tests passed.\n'
