@@ -442,61 +442,245 @@ FAKE_INHIBIT
   assert_eq dash-command-ran "$(PATH="$fake_bin:$PATH" XDG_RUNTIME_DIR="$runtime_dir" "$repo_root/bin/nosleep" run -dashcmd)" 'dash-prefixed command'
 }
 
-test_extension_metadata() {
-  local extension_uuid metadata_uuid icon
+extension_source_matches() {
+  local variant="$1"
+  local pattern="$2"
+  local message="$3"
 
-  extension_uuid="nosleep-toggle@systemd-inhibit.local"
-  metadata_uuid="$(sed -n 's/.*"uuid": *"\([^"]*\)".*/\1/p' "$repo_root/extension/metadata.json")"
-  assert_eq "$extension_uuid" "$metadata_uuid" 'metadata UUID'
-
-  grep -F '"shell-version": ["46"]' "$repo_root/extension/metadata.json" >/dev/null || {
-    printf 'FAIL: metadata shell-version does not include GNOME Shell 46\n' >&2
+  grep -E -e "$pattern" "$repo_root/$variant/extension.js" >/dev/null || {
+    printf 'FAIL: %s/extension.js %s\n' "$variant" "$message" >&2
     exit 1
   }
+}
+
+extension_source_lacks() {
+  local variant="$1"
+  local pattern="$2"
+  local message="$3"
+
+  if grep -E -e "$pattern" "$repo_root/$variant/extension.js" >/dev/null; then
+    printf 'FAIL: %s/extension.js %s\n' "$variant" "$message" >&2
+    exit 1
+  fi
+}
+
+check_extension_variant() {
+  local variant="$1"
+  local expected_shell_version="$2"
+  local variant_dir="$repo_root/$variant"
+  local contract icon metadata_uuid shell_version
+  local -a source_contracts
+
+  metadata_uuid="$(sed -n 's/.*"uuid": *"\([^"]*\)".*/\1/p' "$variant_dir/metadata.json")"
+  assert_eq nosleep-toggle@systemd-inhibit.local "$metadata_uuid" "$variant metadata UUID"
+
+  shell_version="$(sed -n 's/.*"shell-version": *\[\(.*\)\].*/\1/p' "$variant_dir/metadata.json" | tr -d '" ')"
+  assert_eq "$expected_shell_version" "$shell_version" "$variant metadata shell-version"
 
   while IFS= read -r icon; do
-    [[ -f "$repo_root/extension/icons/$icon" ]] || {
-      printf 'FAIL: missing extension icon: %s\n' "$icon" >&2
+    [[ -f "$variant_dir/icons/$icon" ]] || {
+      printf 'FAIL: missing %s icon: %s\n' "$variant" "$icon" >&2
       exit 1
     }
-  done < <(grep -o 'nosleep-[a-z]*-symbolic\.svg' "$repo_root/extension/extension.js" | sort -u)
+  done < <(grep -o 'nosleep-[a-z]*-symbolic\.svg' "$variant_dir/extension.js" | sort -u)
 
-  grep -F '_signalControl(control, SIGTERM)' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not terminate subprocesses gracefully first\n' >&2
+  # Each entry is 'fixed string|failure message'.
+  source_contracts=(
+    '_signalControl(control, SIGTERM)|does not terminate subprocesses gracefully first'
+    "const SETSID_PATH = '/usr/bin/setsid';|does not launch controls in a new session"
+    'get_identifier|does not track the subprocess process group'
+    'processGroupId|does not signal subprocess process groups'
+    'SIGKILL|does not keep a process group force-kill fallback'
+    'FORCE_EXIT_DELAY_SECONDS|does not keep a delayed force-exit fallback'
+    '_stateGeneration|does not guard stale refresh results'
+    'loading:|does not have an initial loading state'
+    '_statusLoaded|does not guard toggles before initial status'
+  )
+  for contract in "${source_contracts[@]}"; do
+    grep -F -e "${contract%%|*}" "$variant_dir/extension.js" >/dev/null || {
+      printf 'FAIL: %s/extension.js %s\n' "$variant" "${contract#*|}" >&2
+      exit 1
+    }
+  done
+}
+
+# Prints a variant's metadata.json with the shell-version value blanked, so
+# that everything else, including the rest of that line, is still compared.
+metadata_without_shell_version() {
+  local variant="$1"
+
+  sed 's/"shell-version": *\[[^]]*\]/"shell-version": []/' "$repo_root/$variant/metadata.json"
+}
+
+test_extension_metadata() {
+  check_extension_variant extension 46
+  check_extension_variant extension-legacy 42
+
+  if ! diff <(metadata_without_shell_version extension) \
+    <(metadata_without_shell_version extension-legacy) >/dev/null; then
+    printf 'FAIL: extension variant metadata differs beyond shell-version\n' >&2
+    exit 1
+  fi
+
+  [[ -L "$repo_root/extension-legacy/icons" ]] || {
+    printf 'FAIL: extension-legacy/icons is not a symlink\n' >&2
     exit 1
   }
-  grep -F "const SETSID_PATH = '/usr/bin/setsid';" "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not launch controls in a new session\n' >&2
+  assert_eq ../extension/icons "$(readlink "$repo_root/extension-legacy/icons")" 'legacy extension icons link'
+}
+
+# Prints one part of a variant's extension.js. The parts do not overlap and
+# together cover the file from the UUID constant to its last line:
+#   shared        the code both variants must share: from the UUID constant to
+#                 the end of the indicator class, without the click-policy
+#                 method
+#   click-policy  the click-policy method of the indicator class
+#   entry-point   everything after the indicator class
+# The class ends at the first "});" line after its "const NoSleepIndicator = "
+# line, so an earlier "});" does not cut the shared code short.
+extension_source_part() {
+  local variant="$1"
+  local click_method="$2"
+  local wanted="$3"
+
+  awk -v wanted="$wanted" -v click_header="    $click_method(event) {" '
+    part == "" && /^const UUID = / { part = "shared" }
+    part == "shared" && /^const NoSleepIndicator = / { in_class = 1 }
+    part == "shared" && in_class && $0 == click_header { part = "click-policy" }
+    part == wanted { print }
+    part == "click-policy" && $0 == "    }" { part = "shared"; next }
+    part == "shared" && in_class && $0 == "});" { part = "entry-point" }
+  ' "$repo_root/$variant/extension.js"
+}
+
+# Fails unless the code lines of a part of extension-legacy/extension.js are
+# exactly the lines on standard input. Blank lines and lines holding only a //
+# comment are not code lines, so such a comment cannot stand in for a statement.
+assert_legacy_code() {
+  local label="$1"
+  local part="$2"
+  local actual pinned
+
+  pinned="$(cat)"
+  actual="$(sed -E '/^[[:space:]]*(\/\/.*)?$/d' <<<"$part")"
+  if [[ "$actual" != "$pinned" ]]; then
+    printf 'FAIL: extension-legacy/extension.js %s differs from the code pinned in tests/run.sh (< pinned, > file)\n' "$label" >&2
+    diff <(printf '%s\n' "$pinned") <(printf '%s\n' "$actual") | head -n 20 >&2 || true
+    exit 1
+  fi
+}
+
+test_extension_variants() {
+  local esm_body esm_click_policy esm_lines expected_legacy_body legacy_body variant
+
+  # GNOME Shell 45+ runs import() on extension/extension.js.
+  extension_source_matches extension '^export default class ' 'has no default export class'
+  extension_source_lacks extension '(^|[^.[:alnum:]_])imports[.]' 'uses the legacy imports object'
+
+  # GNOME Shell 42 loads extension-legacy/extension.js as a legacy script.
+  extension_source_lacks extension-legacy '^(import|export)([^[:alnum:]_]|$)' 'uses ES module syntax'
+  extension_source_lacks extension-legacy $'\r' 'contains a carriage return'
+  extension_source_matches extension-legacy '^function init[(]extension[)] [{]$' 'has no init(extension) entry point'
+
+  # GNOME Shell 42 toggles the menu in PanelMenu.Button.vfunc_event() before
+  # button-press-event is emitted, so the click policy has to live there.
+  extension_source_matches extension-legacy '^    vfunc_event[(]event[)] [{]$' 'does not decide the click policy in vfunc_event'
+  extension_source_lacks extension-legacy '^[[:space:]]*vfunc_button_press_event[(]' 'handles clicks in vfunc_button_press_event'
+
+  # Yaru's 27px panel squeezes the icon unless its vertical padding is removed.
+  extension_source_matches extension-legacy "^const ICON_STYLE = 'padding-top: 0; padding-bottom: 0;';\$" 'does not define the icon style'
+  extension_source_matches extension-legacy '^            style: ICON_STYLE,$' 'does not apply the icon style'
+
+  for variant in extension extension-legacy; do
+    # extension_source_part splits each file at these two lines.
+    extension_source_matches "$variant" '^const UUID = ' 'does not define the UUID constant'
+    extension_source_matches "$variant" '^const NoSleepIndicator = ' 'does not define the indicator class as NoSleepIndicator'
+    extension_source_matches "$variant" "^        Main[.]panel[.]addToStatusArea[(]UUID, this[.]_indicator, 1, 'right'[)];\$" 'does not add the indicator to the status area'
+    extension_source_matches "$variant" '^            this[.]_indicator[.]destroy[(][)];$' 'does not destroy the indicator on disable'
+  done
+
+  esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
+  # Sanity floor (344 lines today): an empty or truncated span must not pass.
+  esm_lines=0
+  [[ -z "$esm_body" ]] || esm_lines="$(wc -l <<<"$esm_body")"
+  [[ "$esm_lines" -gt 300 ]] || {
+    printf 'FAIL: extension/extension.js has %s lines of shared code; expected more than 300 from "const UUID" to the end of the NoSleepIndicator class\n' "$esm_lines" >&2
     exit 1
   }
-  grep -F 'get_identifier' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not track the subprocess process group\n' >&2
+
+  # Nothing compares the legacy click policy and the legacy entry point with
+  # the ES module, so their code lines are pinned here. Their behaviour can
+  # only be checked by running the variant: before changing the pinned text,
+  # enable the variant on GNOME Shell 42 and click the indicator again.
+  assert_legacy_code 'click policy' "$(extension_source_part extension-legacy vfunc_event click-policy)" <<'PINNED'
+    vfunc_event(event) {
+        if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+            return super.vfunc_event(event);
+        const button = event.get_button();
+        if (button === Clutter.BUTTON_PRIMARY) {
+            this._toggle();
+            return Clutter.EVENT_STOP;
+        }
+        if (button === Clutter.BUTTON_SECONDARY) {
+            this.menu.toggle();
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+PINNED
+  assert_legacy_code 'entry point' "$(extension_source_part extension-legacy vfunc_event entry-point)" <<'PINNED'
+class NoSleepToggleExtension {
+    constructor(extension) {
+        this._path = extension.path;
+        this._indicator = null;
+    }
+    enable() {
+        this._indicator = new NoSleepIndicator(Gio.File.new_for_path(this._path));
+        Main.panel.addToStatusArea(UUID, this._indicator, 1, 'right');
+    }
+    disable() {
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+    }
+}
+function init(extension) {
+    return new NoSleepToggleExtension(extension);
+}
+PINNED
+
+  # The parity check skips the click-policy method of each file. The ES
+  # module's is not pinned, so make sure the range skipped there is that one
+  # method: only its header and its closing brace are indented less than a
+  # method body.
+  esm_click_policy="$(extension_source_part extension vfunc_button_press_event click-policy)"
+  [[ "$(grep -c -v -E -e '^(        |[[:space:]]*$)' <<<"$esm_click_policy")" -eq 2 ]] || {
+    printf 'FAIL: extension/extension.js click-policy range is not exactly one method\n' >&2
     exit 1
   }
-  grep -F 'processGroupId' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not signal subprocess process groups\n' >&2
+  # The braces opened by the header must close on the last line, not earlier.
+  awk '
+    { depth += gsub(/[{]/, "{") - gsub(/[}]/, "}") }
+    depth == 0 && !closed { closed = NR }
+    END { exit closed != NR }
+  ' <<<"$esm_click_policy" || {
+    printf 'FAIL: extension/extension.js click-policy range closes before its last line\n' >&2
     exit 1
   }
-  grep -F 'SIGKILL' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not keep a process group force-kill fallback\n' >&2
+
+  legacy_body="$(extension_source_part extension-legacy vfunc_event shared)"
+  # The legacy file has exactly one more line: the icon style, right after the
+  # icon's style class. A style: ICON_STYLE line anywhere else is a difference.
+  expected_legacy_body="$(awk -v style_class="            style_class: 'system-status-icon'," '
+    { print }
+    $0 == style_class && !styled { print "            style: ICON_STYLE,"; styled = 1 }
+  ' <<<"$esm_body")"
+  if [[ "$legacy_body" != "$expected_legacy_body" ]]; then
+    printf 'FAIL: shared extension code differs between extension/ and extension-legacy/\n' >&2
+    diff <(printf '%s\n' "$expected_legacy_body") <(printf '%s\n' "$legacy_body") | head -n 20 >&2 || true
     exit 1
-  }
-  grep -F 'FORCE_EXIT_DELAY_SECONDS' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not keep a delayed force-exit fallback\n' >&2
-    exit 1
-  }
-  grep -F '_stateGeneration' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not guard stale refresh results\n' >&2
-    exit 1
-  }
-  grep -F 'loading:' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not have an initial loading state\n' >&2
-    exit 1
-  }
-  grep -F '_statusLoaded' "$repo_root/extension/extension.js" >/dev/null || {
-    printf 'FAIL: extension does not guard toggles before initial status\n' >&2
-    exit 1
-  }
+  fi
 }
 
 test_install_uninstall() {
@@ -585,6 +769,7 @@ test_state_dir_symlink
 test_state_dir_concurrent_create
 test_cli_state
 test_extension_metadata
+test_extension_variants
 test_install_uninstall
 
 printf 'All tests passed.\n'
