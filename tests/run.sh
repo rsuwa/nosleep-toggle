@@ -553,6 +553,23 @@ extension_source_part() {
   ' "$repo_root/$variant/extension.js"
 }
 
+# Fails unless the code lines of a part of extension-legacy/extension.js are
+# exactly the lines on standard input. Comment-only and blank lines are not
+# code lines, so a comment cannot stand in for a statement.
+assert_legacy_code() {
+  local label="$1"
+  local part="$2"
+  local actual pinned
+
+  pinned="$(cat)"
+  actual="$(sed -E '/^[[:space:]]*(\/\/.*)?$/d' <<<"$part")"
+  if [[ "$actual" != "$pinned" ]]; then
+    printf 'FAIL: extension-legacy/extension.js %s differs from the code pinned in tests/run.sh (< pinned, > file)\n' "$label" >&2
+    diff <(printf '%s\n' "$pinned") <(printf '%s\n' "$actual") | head -n 20 >&2 || true
+    exit 1
+  fi
+}
+
 test_extension_variants() {
   local esm_body esm_lines legacy_body variant
 
@@ -567,7 +584,6 @@ test_extension_variants() {
   # GNOME Shell 42 toggles the menu in PanelMenu.Button.vfunc_event() before
   # button-press-event is emitted, so the click policy has to live there.
   extension_source_matches extension-legacy '^    vfunc_event[(]event[)] [{]$' 'does not decide the click policy in vfunc_event'
-  extension_source_matches extension-legacy 'return super[.]vfunc_event[(]event[)];' 'does not chain other events up to PanelMenu.Button'
   extension_source_lacks extension-legacy '^[[:space:]]*vfunc_button_press_event[(]' 'handles clicks in vfunc_button_press_event'
 
   # Yaru's 27px panel squeezes the icon unless its vertical padding is removed.
@@ -575,9 +591,54 @@ test_extension_variants() {
   extension_source_matches extension-legacy '^            style: ICON_STYLE,$' 'does not apply the icon style'
 
   for variant in extension extension-legacy; do
+    # extension_source_part splits each file at these two lines.
+    extension_source_matches "$variant" '^const UUID = ' 'does not define the UUID constant'
     extension_source_matches "$variant" '^const NoSleepIndicator = ' 'does not define the indicator class as NoSleepIndicator'
     extension_source_matches "$variant" "^        Main[.]panel[.]addToStatusArea[(]UUID, this[.]_indicator, 1, 'right'[)];\$" 'does not add the indicator to the status area'
+    extension_source_matches "$variant" '^            this[.]_indicator[.]destroy[(][)];$' 'does not destroy the indicator on disable'
   done
+
+  # Nothing compares the legacy click policy and the legacy entry point with
+  # the ES module, so their code lines are pinned here. Their behaviour can
+  # only be checked by running the variant: before changing the pinned text,
+  # enable the variant on GNOME Shell 42 and click the indicator again.
+  assert_legacy_code 'click policy' "$(extension_source_part extension-legacy vfunc_event click-policy)" <<'PINNED'
+    vfunc_event(event) {
+        if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+            return super.vfunc_event(event);
+        const button = event.get_button();
+        if (button === Clutter.BUTTON_PRIMARY) {
+            this._toggle();
+            return Clutter.EVENT_STOP;
+        }
+        if (button === Clutter.BUTTON_SECONDARY) {
+            this.menu.toggle();
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+PINNED
+  assert_legacy_code 'entry point' "$(extension_source_part extension-legacy vfunc_event entry-point)" <<'PINNED'
+class NoSleepToggleExtension {
+    constructor(extension) {
+        this._path = extension.path;
+        this._indicator = null;
+    }
+    enable() {
+        this._indicator = new NoSleepIndicator(Gio.File.new_for_path(this._path));
+        Main.panel.addToStatusArea(UUID, this._indicator, 1, 'right');
+    }
+    disable() {
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+    }
+}
+function init(extension) {
+    return new NoSleepToggleExtension(extension);
+}
+PINNED
 
   esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
   legacy_body="$(extension_source_part extension-legacy vfunc_event shared | sed '/^            style: ICON_STYLE,$/d')"
