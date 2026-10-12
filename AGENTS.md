@@ -28,7 +28,7 @@ There is no build step. Development usually happens directly from the checked-ou
 - `shellcheck bin/nosleep install.sh uninstall.sh tests/run.sh`: runs optional Bash linting if ShellCheck is installed.
 - `nosleep status`: verifies CLI state after installation; expected output is `off`, `on`, or `running`.
 - `nosleep --raw-status`: prints the raw global `systemd-inhibit` list for troubleshooting; `--status` remains as a legacy alias.
-- Node.js for the lint tooling must satisfy ESLint 9's range (`^18.18.0 || ^20.9.0 || >=21.1.0`); Ubuntu 22.04's packaged Node.js 12 is too old, so use a newer Node.js there (for example via nvm). `./tests/run.sh` skips the lint step with a `SKIP:` line when npm dependencies are missing, `node` or `npm` is not on `PATH`, or Node.js is too old.
+- Node.js for the lint tooling must satisfy ESLint 9's range (`^18.18.0 || ^20.9.0 || >=21.1.0`); Ubuntu 22.04's packaged Node.js 12 is too old, so use a newer Node.js there (for example via nvm). `./tests/run.sh` skips the lint step with a `SKIP:` line when npm dependencies are missing, `node` or `npm` is not on `PATH`, the Node.js version cannot be determined from `node --version`, or that version is outside the range.
 
 ## Coding Style & Naming Conventions
 

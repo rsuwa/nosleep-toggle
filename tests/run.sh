@@ -74,8 +74,13 @@ test_js_lint() {
   fi
 
   node_version="$(node --version 2>/dev/null || true)"
+  if [[ ! "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[-+.0-9A-Za-z]*$ ]]; then
+    printf 'SKIP: JS lint skipped because the Node.js version could not be determined from "node --version"\n'
+    return 0
+  fi
+
   if ! node_supports_eslint "$node_version"; then
-    printf 'SKIP: JS lint skipped because Node.js %s is too old for ESLint 9 (needs ^18.18.0 || ^20.9.0 || >=21.1.0)\n' "${node_version:-(unknown version)}"
+    printf 'SKIP: JS lint skipped because Node.js %s is not supported by ESLint 9 (needs ^18.18.0 || ^20.9.0 || >=21.1.0)\n' "$node_version"
     return 0
   fi
 

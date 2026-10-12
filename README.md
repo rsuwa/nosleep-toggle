@@ -90,7 +90,7 @@ Ubuntu 22.04's packaged Node.js 12 is too old; use a newer Node.js there, for ex
 Using nosleep-toggle itself does not require Node.js.
 
 The test script uses temporary runtime and home directories.
-When npm dependencies are installed and Node.js is new enough, it also runs the JavaScript lint check; otherwise it skips that step and says why.
+When npm dependencies are installed and a supported Node.js version is detected, it also runs the JavaScript lint check; otherwise it skips that step and says why.
 It skips the CLI state test if another `nosleep` inhibitor is already active.
 
 ## Safety
