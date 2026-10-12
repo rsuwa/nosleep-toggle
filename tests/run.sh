@@ -529,18 +529,32 @@ test_extension_metadata() {
   assert_eq ../extension/icons "$(readlink "$repo_root/extension-legacy/icons")" 'legacy extension icons link'
 }
 
-# Prints the code both extension variants must share: everything from the UUID
-# constant to the end of the indicator class except the click-policy method.
-shared_extension_body() {
+# Prints one part of a variant's extension.js. The parts do not overlap and
+# together cover the file from the UUID constant to its last line:
+#   shared        the code both variants must share: from the UUID constant to
+#                 the end of the indicator class, without the click-policy
+#                 method
+#   click-policy  the click-policy method of the indicator class
+#   entry-point   everything after the indicator class
+# The class ends at the first "});" line after its "const NoSleepIndicator = "
+# line, so an earlier "});" does not cut the shared code short.
+extension_source_part() {
   local variant="$1"
   local click_method="$2"
+  local wanted="$3"
 
-  sed -n '/^const UUID = /,/^});$/p' "$repo_root/$variant/extension.js" |
-    sed "/^    $click_method(event) {\$/,/^    }\$/d"
+  awk -v wanted="$wanted" -v click_header="    $click_method(event) {" '
+    part == "" && /^const UUID = / { part = "shared" }
+    part == "shared" && /^const NoSleepIndicator = / { in_class = 1 }
+    part == "shared" && in_class && $0 == click_header { part = "click-policy" }
+    part == wanted { print }
+    part == "click-policy" && $0 == "    }" { part = "shared"; next }
+    part == "shared" && in_class && $0 == "});" { part = "entry-point" }
+  ' "$repo_root/$variant/extension.js"
 }
 
 test_extension_variants() {
-  local esm_body legacy_body variant
+  local esm_body esm_lines legacy_body variant
 
   # GNOME Shell 45+ runs import() on extension/extension.js.
   extension_source_matches extension '^export default class ' 'has no default export class'
@@ -561,14 +575,17 @@ test_extension_variants() {
   extension_source_matches extension-legacy '^            style: ICON_STYLE,$' 'does not apply the icon style'
 
   for variant in extension extension-legacy; do
+    extension_source_matches "$variant" '^const NoSleepIndicator = ' 'does not define the indicator class as NoSleepIndicator'
     extension_source_matches "$variant" "^        Main[.]panel[.]addToStatusArea[(]UUID, this[.]_indicator, 1, 'right'[)];\$" 'does not add the indicator to the status area'
   done
 
-  esm_body="$(shared_extension_body extension vfunc_button_press_event)"
-  legacy_body="$(shared_extension_body extension-legacy vfunc_event | sed '/^            style: ICON_STYLE,$/d')"
+  esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
+  legacy_body="$(extension_source_part extension-legacy vfunc_event shared | sed '/^            style: ICON_STYLE,$/d')"
   # Sanity floor (344 lines today): an empty or truncated span must not pass.
-  [[ "$(wc -l <<<"$esm_body")" -gt 300 ]] || {
-    printf 'FAIL: shared extension code not found in extension/extension.js\n' >&2
+  esm_lines=0
+  [[ -z "$esm_body" ]] || esm_lines="$(wc -l <<<"$esm_body")"
+  [[ "$esm_lines" -gt 300 ]] || {
+    printf 'FAIL: extension/extension.js has %s lines of shared code; expected more than 300 from "const UUID" to the end of the NoSleepIndicator class\n' "$esm_lines" >&2
     exit 1
   }
   if [[ "$esm_body" != "$legacy_body" ]]; then
