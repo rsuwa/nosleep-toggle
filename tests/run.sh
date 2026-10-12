@@ -47,12 +47,58 @@ test_syntax() {
   bash -n "$repo_root/bin/nosleep" "$repo_root/install.sh" "$repo_root/uninstall.sh"
 }
 
+# ESLint 9 (pinned in package-lock.json) needs Node.js ^18.18.0 || ^20.9.0 || >=21.1.0.
+node_supports_eslint() {
+  local version="$1"
+  local major minor
+
+  [[ "$version" =~ ^v([0-9]+)\.([0-9]+)\. ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+
+  ((major == 18 && minor >= 18)) || ((major == 20 && minor >= 9)) ||
+    ((major == 21 && minor >= 1)) || ((major >= 22))
+}
+
 test_js_lint() {
-  if [[ -x "$repo_root/node_modules/.bin/eslint" ]]; then
-    npm --prefix "$repo_root" run lint:js >/dev/null
-  else
+  local node_version version
+
+  # A wrong boundary would only skip the lint below, so check the helper first; this needs no Node.js.
+  for version in v18.18.0 v18.19.1 v20.9.0 v20.19.2 v21.1.0 v21.7.3 v22.0.0 v100.0.0; do
+    if ! node_supports_eslint "$version"; then
+      printf 'FAIL: node_supports_eslint rejected "%s", which ESLint 9 supports\n' "$version" >&2
+      exit 1
+    fi
+  done
+  for version in v12.22.9 v18.9.0 v18.17.1 v19.9.0 v20.8.1 v21.0.0 22.16.0 ''; do
+    if node_supports_eslint "$version"; then
+      printf 'FAIL: node_supports_eslint accepted "%s", which ESLint 9 does not support\n' "$version" >&2
+      exit 1
+    fi
+  done
+
+  if [[ ! -x "$repo_root/node_modules/.bin/eslint" ]]; then
     printf 'SKIP: JS lint skipped because npm dependencies are not installed\n'
+    return 0
   fi
+
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    printf 'SKIP: JS lint skipped because node or npm is not on PATH\n'
+    return 0
+  fi
+
+  node_version="$(node --version 2>/dev/null || true)"
+  if [[ ! "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[-+.0-9A-Za-z]*$ ]]; then
+    printf 'SKIP: JS lint skipped because the Node.js version could not be determined from "node --version"\n'
+    return 0
+  fi
+
+  if ! node_supports_eslint "$node_version"; then
+    printf 'SKIP: JS lint skipped because Node.js %s is not supported by ESLint 9 (needs ^18.18.0 || ^20.9.0 || >=21.1.0)\n' "$node_version"
+    return 0
+  fi
+
+  npm --prefix "$repo_root" run lint:js >/dev/null
 }
 
 test_status_list_failure() {
