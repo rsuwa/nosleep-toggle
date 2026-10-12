@@ -9,7 +9,7 @@ This repository provides a Bash CLI plus a GNOME Shell extension for toggling sl
 - `extension/metadata.json`: extension UUID, name, supported Shell version, and version. Both variants share the UUID; their metadata files differ only in `shell-version`.
 - `extension/icons/`: symbolic SVG status icons named by state. The SVGs live only here; `extension-legacy/icons` is a relative symlink to this directory.
 - `extension-legacy/`: GNOME Shell 42 (Ubuntu 22.04) variant of the same extension. `extension.js` is a legacy `imports.*` script with an `init()` entry point, and `metadata.json` declares only Shell 42.
-- `install.sh` and `uninstall.sh`: symlink the CLI and extension into the user's local GNOME paths; uninstall only stops/disables links owned by this checkout.
+- `install.sh` and `uninstall.sh`: symlink the CLI and the extension variant matching the installed GNOME Shell major version (`extension/` for 45 and newer, `extension-legacy/` for older) into the user's local GNOME paths; uninstall only stops/disables links owned by this checkout, and an extension link to either variant directory counts as owned.
 - `tests/run.sh`: Bash smoke/regression test script for CLI lifecycle, adversarial inhibitor parsing, state setup, installer, metadata and icon contracts of both extension variants, and extension variant parity.
 - `package.json`, `package-lock.json`, and `eslint.config.mjs`: pinned JavaScript lint tooling for both GNOME Shell extension variants.
 - `README.md` and `README.ja.md`: user-facing documentation.
@@ -19,9 +19,9 @@ This repository provides a Bash CLI plus a GNOME Shell extension for toggling sl
 
 There is no build step. Development usually happens directly from the checked-out tree.
 
-- `./install.sh`: installs local symlinks for `bin/nosleep` and the GNOME extension.
-- `./uninstall.sh`: when installed links point to this checkout, stops persistent NoSleep, disables the extension when possible, and removes only owned links.
-- `./tests/run.sh`: runs the repository smoke/regression tests, including adversarial inhibitor parsing, interrupted start cleanup, delayed startup readiness, duplicate blocker cleanup, PATH poisoning, concurrent state directory setup, state directory and lock handling, installer behavior, metadata and icon references of both extension variants, and extension variant parity.
+- `./install.sh`: installs local symlinks for `bin/nosleep` and the GNOME extension variant selected from `gnome-shell --version`; when the Shell version cannot be determined it installs only the CLI link and warns.
+- `./uninstall.sh`: when installed links point to this checkout (the extension link may point at either variant), stops persistent NoSleep, disables the extension when possible, and removes only owned links.
+- `./tests/run.sh`: runs the repository smoke/regression tests, including adversarial inhibitor parsing, interrupted start cleanup, delayed startup readiness, duplicate blocker cleanup, PATH poisoning, concurrent state directory setup, state directory and lock handling, installer behavior including extension variant selection and link ownership, metadata and icon references of both extension variants, and extension variant parity.
 - `npm install`: installs JavaScript lint tooling from `package-lock.json`.
 - `npm run lint:js`: runs ESLint against both GNOME Shell extension variants.
 - `bash -n bin/nosleep install.sh uninstall.sh tests/run.sh`: checks Bash syntax.
@@ -71,7 +71,9 @@ Before opening a pull request, run `./tests/run.sh`, `npm run lint:js`, the Bash
 For process-detection and stop changes, include regression coverage for spoofed `--who` values with whitespace, pid files that point at a process without a logind inhibitor, successful inhibitor-list queries that miss a recorded blocker, duplicate matching persistent inhibitors, recorded-plus-duplicate blockers, and fallback stops that must not leave blocker process groups behind.
 For lifecycle changes, include coverage that interrupted `nosleep on` does not leave a blocker or partial state files, delayed `setsid`/exec readiness still succeeds, and startup failure cleanup does not leave stale traps.
 For locking/state-directory changes, include coverage that a preexisting `lock` symlink is not opened or truncated, a symlink runtime state directory is rejected, and concurrent first-time state directory creation succeeds.
-For installer tests, isolate `gnome-extensions` with `NOSLEEP_GNOME_EXTENSIONS_CMD`; the scripts reset `PATH` before normal command lookup.
+For installer tests, isolate `gnome-extensions` with `NOSLEEP_GNOME_EXTENSIONS_CMD` and pin the GNOME Shell version with `NOSLEEP_GNOME_SHELL_CMD`, a command whose `--version` prints `GNOME Shell <version>` on stdout; the scripts reset `PATH` before normal command lookup, so fakes on `PATH` are ignored.
+Every `install.sh` call in `tests/run.sh` must set both variables to a non-empty value (an empty one falls back to the host command), so the result never depends on the host's GNOME Shell. New `uninstall.sh` test cases must put a fake `systemd-inhibit` first in `NOSLEEP_TRUSTED_PATH` so they never run a real `nosleep off`.
+For installer changes, include coverage that every Shell major declared in a variant's `metadata.json` selects that variant, an undeclared major warns but still links, an undetectable version leaves the extension link alone without calling `gnome-extensions`, switching between the variants of this checkout leaves no `*.bak.*` entry, links into another checkout are backed up by `install.sh` and preserved by `uninstall.sh`, and the restart/enable guidance matches the outcome of the enable call.
 Neither `gjs -m extension/extension.js` nor `gjs extension-legacy/extension.js` is a reliable test outside GNOME Shell because both files import modules that only exist inside the Shell.
 For extension subprocess termination code, a local `gjs -c` smoke check can verify that a `setsid`-launched subprocess tree is released when its process group receives SIGTERM.
 
@@ -85,4 +87,12 @@ Pull requests should describe behavior changes, list manual verification steps, 
 
 Installation is symlink-based.
 Changes in the checkout affect the installed CLI and extension immediately.
-GNOME Shell may not recognize a newly installed extension UUID until logout/login; keep that distinction separate from file installation failures.
+`install.sh` reads the GNOME Shell major version from the stdout of `gnome-shell --version` (run with `LC_ALL=C`; `NOSLEEP_GNOME_SHELL_CMD` overrides the command) and decides the variant before it creates any link: `extension/` for 45 and newer, `extension-legacy/` for older.
+The installed link text is part of the interface: existing Ubuntu 24.04 installs are live symlinks to `<checkout>/extension`, so that directory must remain the GNOME Shell 45+ variant and `<checkout>/extension-legacy` the legacy one. Do not rename either directory, and keep the directory names in `install.sh` and `uninstall.sh` in sync.
+A Shell major that the selected variant's `metadata.json` does not list is still linked, with a warning that the version is not supported.
+When the Shell version cannot be determined, `install.sh` installs only the CLI link, neither creates nor changes the extension link, does not call `gnome-extensions`, prints a warning that names `NOSLEEP_GNOME_SHELL_CMD`, and exits 0.
+Link ownership is an exact match of the link text. `install.sh` switches a link to the other variant of this checkout in place and backs up anything else in the way, including links into another checkout; `uninstall.sh` owns a link to either variant of this checkout and nothing else.
+Never back up an owned variant link: GNOME Shell tries to load every entry in the extensions directory, so a `*.bak.*` directory there logs a load error on each start.
+GNOME Shell scans extension directories only when it starts, so the running Shell does not see a new or changed link. For a UUID it has not scanned, `gnome-extensions enable` fails without recording anything, and after the restart the extension stays disabled until it is enabled; for a link switched in a running session the enable call succeeds, but the Shell keeps the old state until it restarts. Keep that distinction separate from file installation failures.
+The post-install guidance follows the enable call: when it failed, or no `gnome-extensions` command is available, print two unconditional ordered steps (restart GNOME Shell, then `gnome-extensions enable nosleep-toggle@systemd-inhibit.local`); when it succeeded and the extension link was created or changed, print the restart step only; otherwise print no restart hint.
+The scripts must not write `org.gnome.shell` settings themselves, for example through `gsettings` or `dconf`: with a mismatched `HOME` and session bus, a read-modify-write could overwrite the real `enabled-extensions` list.
