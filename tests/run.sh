@@ -504,12 +504,20 @@ check_extension_variant() {
   done
 }
 
+# Prints a variant's metadata.json with the shell-version value blanked, so
+# that everything else, including the rest of that line, is still compared.
+metadata_without_shell_version() {
+  local variant="$1"
+
+  sed 's/"shell-version": *\[[^]]*\]/"shell-version": []/' "$repo_root/$variant/metadata.json"
+}
+
 test_extension_metadata() {
   check_extension_variant extension 46
   check_extension_variant extension-legacy 42
 
-  if ! diff <(grep -v '"shell-version"' "$repo_root/extension/metadata.json") \
-    <(grep -v '"shell-version"' "$repo_root/extension-legacy/metadata.json") >/dev/null; then
+  if ! diff <(metadata_without_shell_version extension) \
+    <(metadata_without_shell_version extension-legacy) >/dev/null; then
     printf 'FAIL: extension variant metadata differs beyond shell-version\n' >&2
     exit 1
   fi
