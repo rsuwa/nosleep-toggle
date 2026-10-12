@@ -9,12 +9,13 @@ It is intended for short moves while a long-running CLI command keeps running.
 
 ## Supported Environment
 
-- Ubuntu 24.04
-- GNOME Shell 46
+- Ubuntu 24.04 with GNOME Shell 46
+- Ubuntu 22.04 with GNOME Shell 42
 - systemd
 - `systemd-inhibit`, `setsid`, and `flock`
 
-Ubuntu 22.04 / GNOME Shell 42 is not supported yet.
+Other GNOME Shell versions are not supported.
+The installer warns about them and links the extension anyway, but GNOME Shell may report it as out of date.
 
 ## Install
 
@@ -29,7 +30,21 @@ Keep the cloned repository in place after installation.
 Because the installed CLI and extension are symlinks, later edits, branch changes, or `git pull` in this checkout immediately affect the installed behavior.
 Install only from a checkout you control.
 
-If GNOME Shell does not detect the new extension immediately, log out and log back in.
+The extension link points at the variant for the installed GNOME Shell version: `extension/` for GNOME Shell 46 and `extension-legacy/` for GNOME Shell 42.
+Run `./install.sh` again after upgrading Ubuntu or GNOME Shell, for example from Ubuntu 22.04 to 24.04.
+Also run it again once if you installed on Ubuntu 22.04 before nosleep-toggle supported it.
+
+GNOME Shell only picks up a new or changed extension when it starts.
+After a first install, restart GNOME Shell first.
+To do that, log out and log back in (on an X11 session you can press Alt+F2, type `r`, and press Enter instead).
+After the restart, enable the extension with the command below, or run `./install.sh` again.
+
+```bash
+gnome-extensions enable nosleep-toggle@systemd-inhibit.local
+```
+
+When the installer only switched the link of an extension that was already enabled, restarting GNOME Shell is enough.
+The installer prints the steps that apply to your case.
 
 ## Uninstall
 

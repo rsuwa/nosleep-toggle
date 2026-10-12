@@ -32,7 +32,7 @@ There is no build step. Development usually happens directly from the checked-ou
 
 ## Coding Style & Naming Conventions
 
-Bash files use `#!/bin/bash`, `set -euo pipefail`, two-space indentation, `snake_case` function names, and `local` variables inside functions. Keep CLI output stable because the extension parses `nosleep status`.
+Bash files use `#!/bin/bash`, `set -euo pipefail`, two-space indentation, `snake_case` function names, and `local` variables inside functions. Keep CLI output stable because the extension parses the output of `nosleep status`, `nosleep on`, and `nosleep off`.
 Internal helper commands are resolved from trusted system paths in `bin/nosleep`; keep user command execution via `nosleep run` using the caller's original `PATH`.
 Separate `systemd-inhibit` options from the inhibited command with `--`.
 Persistent state uses pid, process start time, and boot ID files under the runtime state directory; keep writes atomic and cleanup under the CLI lock.
@@ -67,7 +67,11 @@ Icon assets should remain symbolic SVGs named `nosleep-<state>-symbolic.svg`.
 
 ## Testing Guidelines
 
-Before opening a pull request, run `./tests/run.sh`, `npm run lint:js`, the Bash syntax check, and ShellCheck when available. On Ubuntu 24.04 with GNOME Shell 46, run `./install.sh`, then verify the top-bar states: `Sleep`, `Awake`, `Run`, and the error/unknown path if the helper is unavailable. Also test `nosleep on`, `nosleep off`, `nosleep toggle`, `nosleep status`, `nosleep --raw-status`, and `nosleep run <command>`.
+Before opening a pull request, run `./tests/run.sh`, `npm run lint:js`, the Bash syntax check, and ShellCheck when available. Also test `nosleep on`, `nosleep off`, `nosleep toggle`, `nosleep status`, `nosleep --raw-status`, and `nosleep run <command>`.
+For extension or installer changes, and for CLI changes that alter the output of `nosleep status`, `nosleep on`, or `nosleep off` (the extension parses all three), verify manually on both supported platforms, Ubuntu 24.04 with GNOME Shell 46 and Ubuntu 22.04 with GNOME Shell 42: run `./install.sh`, follow the restart and enable steps it prints, then verify the top-bar states: `Sleep`, `Awake`, `Run`, and the error/unknown path if the helper is unavailable.
+On GNOME Shell 42, left-click the indicator and check that it toggles NoSleep while the menu stays closed, then right-click it and check that the menu opens.
+On GNOME Shell 46, left-click the indicator and check that it toggles NoSleep, then record in the pull request what the menu does on a left click and on a right click. Do not expect the GNOME Shell 42 result there, because the menu's reaction to clicks was measured on GNOME Shell 42 only: `extension/` decides clicks in `vfunc_button_press_event`, and in the upstream GNOME Shell 46 and mutter 46 sources `PanelMenu.Button.vfunc_event` has already toggled the menu when that handler runs.
+Static checks cannot replace these manual runs: lint and `tests/run.sh` do not see GNOME Shell API differences, and during the GNOME Shell 42 port a legacy file that read the mouse button through the wrong event accessor passed lint and the source contract checks that existed at the time and still loaded as `ENABLED` while each click threw.
 For process-detection and stop changes, include regression coverage for spoofed `--who` values with whitespace, pid files that point at a process without a logind inhibitor, successful inhibitor-list queries that miss a recorded blocker, duplicate matching persistent inhibitors, recorded-plus-duplicate blockers, and fallback stops that must not leave blocker process groups behind.
 For lifecycle changes, include coverage that interrupted `nosleep on` does not leave a blocker or partial state files, delayed `setsid`/exec readiness still succeeds, and startup failure cleanup does not leave stale traps.
 For locking/state-directory changes, include coverage that a preexisting `lock` symlink is not opened or truncated, a symlink runtime state directory is rejected, and concurrent first-time state directory creation succeeds.
