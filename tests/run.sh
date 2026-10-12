@@ -881,21 +881,24 @@ run_install() {
   printf '%s\n' "$output"
 }
 
-# run_uninstall HOME FAKE_BIN
-# Uses the fake systemd-inhibit and gnome-extensions from FAKE_BIN.
+# run_uninstall HOME FAKE_BIN [GNOME_EXTENSIONS_CMD]
+# Prints the combined output of uninstall.sh. Uses the fake systemd-inhibit
+# from FAKE_BIN, and its fake gnome-extensions unless another command is given.
 run_uninstall() {
   local home_dir="$1"
   local fake_bin="$2"
+  local extensions_cmd="${3:-$fake_bin/gnome-extensions}"
   local output
 
   mkdir -p "$home_dir/runtime"
   if ! output="$(HOME="$home_dir" XDG_RUNTIME_DIR="$home_dir/runtime" \
     NOSLEEP_TRUSTED_PATH="$fake_bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    NOSLEEP_GNOME_EXTENSIONS_CMD="$extensions_cmd" \
     "$repo_root/uninstall.sh" 2>&1)"; then
     printf 'FAIL: uninstall.sh failed:\n%s\n' "$output" >&2
     exit 1
   fi
+  printf '%s\n' "$output"
 }
 
 assert_output_contains() {
@@ -1135,7 +1138,7 @@ test_uninstall_variant_ownership() {
     run_install "$home_dir" "$fake_bin/gnome-shell-$shell_major" "$fake_bin/gnome-extensions" >/dev/null
     assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "installed $variant link"
     rm -f "$fake_bin/gnome-extensions.log" "$fake_bin/systemd-inhibit.log"
-    run_uninstall "$home_dir" "$fake_bin"
+    run_uninstall "$home_dir" "$fake_bin" >/dev/null
     assert_no_path "$home_dir/$installer_extension_link" "uninstall of the $variant link"
     assert_no_path "$home_dir/.local/bin/nosleep" "uninstall of the CLI link next to $variant"
     assert_eq "disable $installer_uuid" "$(cat "$fake_bin/gnome-extensions.log")" "gnome-extensions calls when uninstalling $variant"
@@ -1153,7 +1156,7 @@ test_uninstall_variant_ownership() {
     home_dir="$root/home-foreign-$index"
     mkdir -p "$home_dir/$installer_extension_root"
     ln -s "$foreign" "$home_dir/$installer_extension_link"
-    run_uninstall "$home_dir" "$fake_bin"
+    run_uninstall "$home_dir" "$fake_bin" >/dev/null
     assert_eq "$foreign" "$(readlink "$home_dir/$installer_extension_link")" "uninstall preserves the link to ${foreign#"$root"/}"
   done
   assert_no_path "$fake_bin/gnome-extensions.log" 'gnome-extensions calls for links not owned by this checkout'
@@ -1213,6 +1216,37 @@ test_install_guidance() {
   assert_output_lacks "$output" "$enable_step" 'variant switch with a working enable'
 }
 
+# A gnome-extensions override that does not name an executable file counts as
+# a missing command in both scripts: install.sh says so, uninstall.sh skips the
+# disable call, and both still handle the links.
+test_installer_unusable_gnome_extensions() {
+  local extensions_cmd fake_bin home_dir output override root
+
+  root="$(make_tmp_dir)"
+  fake_bin="$root/bin"
+  mkdir -p "$fake_bin/gnome-extensions-directory"
+  make_installer_fakes "$fake_bin"
+  printf '#!/bin/bash\n' >"$fake_bin/gnome-extensions-plain-file"
+
+  # gnome-extensions-missing does not exist. `builtin` is a shell builtin and
+  # not a program on the reset PATH, although `command -v` resolves it.
+  for extensions_cmd in "$fake_bin/gnome-extensions-missing" "$fake_bin/gnome-extensions-plain-file" \
+    "$fake_bin/gnome-extensions-directory" builtin; do
+    override="${extensions_cmd##*/}"
+    home_dir="$root/home-$override"
+    mkdir -p "$home_dir"
+
+    output="$(run_install "$home_dir" "$fake_bin/gnome-shell-42" "$extensions_cmd")"
+    assert_eq "$repo_root/extension-legacy" "$(readlink "$home_dir/$installer_extension_link")" "extension link with $override for gnome-extensions"
+    assert_output_contains "$output" 'gnome-extensions was not found' "install with $override for gnome-extensions"
+
+    output="$(run_uninstall "$home_dir" "$fake_bin" "$extensions_cmd")"
+    assert_output_lacks "$output" 'could not disable' "uninstall with $override for gnome-extensions"
+    assert_no_path "$home_dir/$installer_extension_link" "extension link after uninstall with $override for gnome-extensions"
+    assert_no_path "$home_dir/.local/bin/nosleep" "CLI link after uninstall with $override for gnome-extensions"
+  done
+}
+
 # Enabling stays with gnome-extensions: with a mismatched HOME and session bus,
 # writing org.gnome.shell settings could clobber the real enabled list.
 test_installer_leaves_shell_settings_alone() {
@@ -1239,6 +1273,7 @@ test_install_variant_switch
 test_install_foreign_extension_links
 test_uninstall_variant_ownership
 test_install_guidance
+test_installer_unusable_gnome_extensions
 test_installer_leaves_shell_settings_alone
 
 printf 'All tests passed.\n'

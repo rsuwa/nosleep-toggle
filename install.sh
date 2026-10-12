@@ -28,9 +28,16 @@ for command in systemd-inhibit flock setsid; do
   fi
 done
 
-# Prints how to invoke an optional command, or nothing when it is unavailable.
+# Prints the path of an optional program, or nothing when it is unavailable.
+# Only an executable file counts: `command -v` would also accept shell
+# builtins and this script's functions, and both it and `type -P` can report a
+# file on PATH that lacks the executable bit. Keep in sync with uninstall.sh.
 resolve_optional_command() {
-  command -v "$1" 2>/dev/null || true
+  local resolved
+
+  resolved="$(type -P -- "$1" 2>/dev/null)" || return 0
+  [[ -f "$resolved" && -x "$resolved" ]] || return 0
+  printf '%s\n' "$resolved"
 }
 
 gnome_extensions_cmd="$(resolve_optional_command "${NOSLEEP_GNOME_EXTENSIONS_CMD:-gnome-extensions}")"

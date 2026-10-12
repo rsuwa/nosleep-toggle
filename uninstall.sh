@@ -12,16 +12,25 @@ cli_target="$repo_root/bin/nosleep"
 # Every extension variant install.sh can link from this checkout: keep the
 # directory names in sync with it.
 extension_targets=("$repo_root/extension" "$repo_root/extension-legacy")
-gnome_extensions_cmd="${NOSLEEP_GNOME_EXTENSIONS_CMD:-}"
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   printf 'Do not run uninstall.sh as root. Run it as your desktop user.\n' >&2
   exit 1
 fi
 
-if [[ -z "$gnome_extensions_cmd" ]] && command -v gnome-extensions >/dev/null 2>&1; then
-  gnome_extensions_cmd="$(command -v gnome-extensions)"
-fi
+# Prints the path of an optional program, or nothing when it is unavailable.
+# Only an executable file counts: `command -v` would also accept shell
+# builtins and this script's functions, and both it and `type -P` can report a
+# file on PATH that lacks the executable bit. Keep in sync with install.sh.
+resolve_optional_command() {
+  local resolved
+
+  resolved="$(type -P -- "$1" 2>/dev/null)" || return 0
+  [[ -f "$resolved" && -x "$resolved" ]] || return 0
+  printf '%s\n' "$resolved"
+}
+
+gnome_extensions_cmd="$(resolve_optional_command "${NOSLEEP_GNOME_EXTENSIONS_CMD:-gnome-extensions}")"
 
 # link_points_to_any LINK TARGET...
 # Ownership is an exact match of the link text, so links into other checkouts
