@@ -945,7 +945,7 @@ assert_only_extension_link() {
 }
 
 test_install_variant_selection() {
-  local fake_bin home_dir incomplete_checkout major output root unsupported variant version
+  local accepted fake_bin home_dir incomplete_checkout major output root shell_cmd unsupported variant version
   local -a majors
 
   root="$(make_tmp_dir)"
@@ -983,6 +983,20 @@ test_install_variant_selection() {
     output="$(run_install "$home_dir" "$fake_bin/gnome-shell-undeclared" "$fake_bin/gnome-extensions")"
     assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link for GNOME Shell $version"
     assert_output_contains "$output" 'not a supported version' "install for GNOME Shell $version"
+  done
+
+  # Only the first stdout line counts, and its major is a decimal number even
+  # with a leading zero, which shell arithmetic would otherwise read as octal.
+  write_fake_gnome_shell "$fake_bin/gnome-shell-two-lines" $'GNOME Shell 42\nGNOME Shell 46.0'
+  write_fake_gnome_shell "$fake_bin/gnome-shell-leading-zero" 'GNOME Shell 046.0'
+  for accepted in 'gnome-shell-two-lines|extension-legacy' 'gnome-shell-leading-zero|extension'; do
+    shell_cmd="${accepted%%|*}"
+    variant="${accepted#*|}"
+    home_dir="$root/home-$shell_cmd"
+    mkdir -p "$home_dir"
+    output="$(run_install "$home_dir" "$fake_bin/$shell_cmd" "$fake_bin/gnome-extensions")"
+    assert_eq "$repo_root/$variant" "$(readlink "$home_dir/$installer_extension_link")" "extension link with $shell_cmd"
+    assert_output_lacks "$output" 'not a supported version' "install with $shell_cmd"
   done
 
   # Only stdout of `gnome-shell --version` counts, and it is read with LC_ALL=C.
@@ -1024,12 +1038,17 @@ test_install_undetectable_shell() {
   mkdir -p "$fake_bin" "$root/foreign-extension"
   make_installer_fakes "$fake_bin"
   write_fake_gnome_shell "$fake_bin/gnome-shell-unparsable" 'mutter 42.9'
+  # The version line is matched strictly: nothing before "GNOME Shell", and the
+  # major must end at a dot or at the end of the line.
+  write_fake_gnome_shell "$fake_bin/gnome-shell-leading-text" ' GNOME Shell 42.9'
+  write_fake_gnome_shell "$fake_bin/gnome-shell-glued-suffix" 'GNOME Shell 42beta'
   printf '#!/bin/bash\nprintf "GNOME Shell 42.9\\n"\nexit 1\n' >"$fake_bin/gnome-shell-failing"
   printf '#!/bin/bash\nprintf "GNOME Shell 42.9\\n" >&2\n' >"$fake_bin/gnome-shell-stderr"
   chmod +x "$fake_bin/gnome-shell-failing" "$fake_bin/gnome-shell-stderr"
 
   # gnome-shell-missing does not exist.
-  for shell_cmd in gnome-shell-unparsable gnome-shell-failing gnome-shell-stderr gnome-shell-missing; do
+  for shell_cmd in gnome-shell-unparsable gnome-shell-leading-text gnome-shell-glued-suffix \
+    gnome-shell-failing gnome-shell-stderr gnome-shell-missing; do
     home_dir="$root/home-$shell_cmd"
     mkdir -p "$home_dir"
     output="$(run_install "$home_dir" "$fake_bin/$shell_cmd" "$fake_bin/gnome-extensions")"
