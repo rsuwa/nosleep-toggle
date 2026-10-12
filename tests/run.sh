@@ -554,8 +554,8 @@ extension_source_part() {
 }
 
 # Fails unless the code lines of a part of extension-legacy/extension.js are
-# exactly the lines on standard input. Comment-only and blank lines are not
-# code lines, so a comment cannot stand in for a statement.
+# exactly the lines on standard input. Blank lines and lines holding only a //
+# comment are not code lines, so such a comment cannot stand in for a statement.
 assert_legacy_code() {
   local label="$1"
   local part="$2"
@@ -579,6 +579,7 @@ test_extension_variants() {
 
   # GNOME Shell 42 loads extension-legacy/extension.js as a legacy script.
   extension_source_lacks extension-legacy '^(import|export)([^[:alnum:]_]|$)' 'uses ES module syntax'
+  extension_source_lacks extension-legacy $'\r' 'contains a carriage return'
   extension_source_matches extension-legacy '^function init[(]extension[)] [{]$' 'has no init(extension) entry point'
 
   # GNOME Shell 42 toggles the menu in PanelMenu.Button.vfunc_event() before
@@ -658,13 +659,22 @@ PINNED
     printf 'FAIL: extension/extension.js click-policy range is not exactly one method\n' >&2
     exit 1
   }
+  # The braces opened by the header must close on the last line, not earlier.
+  awk '
+    { depth += gsub(/[{]/, "{") - gsub(/[}]/, "}") }
+    depth == 0 && !closed { closed = NR }
+    END { exit closed != NR }
+  ' <<<"$esm_click_policy" || {
+    printf 'FAIL: extension/extension.js click-policy range closes before its last line\n' >&2
+    exit 1
+  }
 
   legacy_body="$(extension_source_part extension-legacy vfunc_event shared)"
   # The legacy file has exactly one more line: the icon style, right after the
   # icon's style class. A style: ICON_STYLE line anywhere else is a difference.
   expected_legacy_body="$(awk -v style_class="            style_class: 'system-status-icon'," '
     { print }
-    $0 == style_class { print "            style: ICON_STYLE," }
+    $0 == style_class && !styled { print "            style: ICON_STYLE,"; styled = 1 }
   ' <<<"$esm_body")"
   if [[ "$legacy_body" != "$expected_legacy_body" ]]; then
     printf 'FAIL: shared extension code differs between extension/ and extension-legacy/\n' >&2
