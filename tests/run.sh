@@ -884,6 +884,8 @@ run_install() {
 # run_uninstall HOME FAKE_BIN [GNOME_EXTENSIONS_CMD]
 # Prints the combined output of uninstall.sh. Uses the fake systemd-inhibit
 # from FAKE_BIN, and its fake gnome-extensions unless another command is given.
+# The private XDG_RUNTIME_DIR is as necessary as the fake: `nosleep off` also
+# stops a blocker recorded in the runtime state directory, whatever is listed.
 run_uninstall() {
   local home_dir="$1"
   local fake_bin="$2"
