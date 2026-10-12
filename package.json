@@ -4,7 +4,7 @@
   "private": true,
   "description": "GNOME Shell extension and CLI for toggling systemd sleep inhibition.",
   "scripts": {
-    "lint:js": "eslint extension/extension.js"
+    "lint:js": "eslint extension/extension.js extension-legacy/extension.js"
   },
   "repository": {
     "type": "git",
