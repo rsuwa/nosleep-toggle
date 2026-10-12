@@ -1265,7 +1265,7 @@ test_installer_unusable_gnome_extensions() {
     assert_output_contains "$output" 'gnome-extensions was not found' "install with $override for gnome-extensions"
 
     output="$(run_uninstall "$home_dir" "$fake_bin" "$extensions_cmd")"
-    assert_output_lacks "$output" 'could not disable' "uninstall with $override for gnome-extensions"
+    assert_output_lacks "$output" 'Warning' "uninstall with $override for gnome-extensions"
     assert_no_path "$home_dir/$installer_extension_link" "extension link after uninstall with $override for gnome-extensions"
     assert_no_path "$home_dir/.local/bin/nosleep" "CLI link after uninstall with $override for gnome-extensions"
   done
