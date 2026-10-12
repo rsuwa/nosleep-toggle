@@ -64,7 +64,7 @@ test_js_lint() {
   local node_version version
 
   # A wrong boundary would only skip the lint below, so check the helper first; this needs no Node.js.
-  for version in v18.18.0 v18.19.1 v20.9.0 v20.19.2 v21.1.0 v22.0.0 v100.0.0; do
+  for version in v18.18.0 v18.19.1 v20.9.0 v20.19.2 v21.1.0 v21.7.3 v22.0.0 v100.0.0; do
     if ! node_supports_eslint "$version"; then
       printf 'FAIL: node_supports_eslint rejected "%s", which ESLint 9 supports\n' "$version" >&2
       exit 1
