@@ -598,6 +598,15 @@ test_extension_variants() {
     extension_source_matches "$variant" '^            this[.]_indicator[.]destroy[(][)];$' 'does not destroy the indicator on disable'
   done
 
+  esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
+  # Sanity floor (344 lines today): an empty or truncated span must not pass.
+  esm_lines=0
+  [[ -z "$esm_body" ]] || esm_lines="$(wc -l <<<"$esm_body")"
+  [[ "$esm_lines" -gt 300 ]] || {
+    printf 'FAIL: extension/extension.js has %s lines of shared code; expected more than 300 from "const UUID" to the end of the NoSleepIndicator class\n' "$esm_lines" >&2
+    exit 1
+  }
+
   # Nothing compares the legacy click policy and the legacy entry point with
   # the ES module, so their code lines are pinned here. Their behaviour can
   # only be checked by running the variant: before changing the pinned text,
@@ -650,15 +659,7 @@ PINNED
     exit 1
   }
 
-  esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
   legacy_body="$(extension_source_part extension-legacy vfunc_event shared)"
-  # Sanity floor (344 lines today): an empty or truncated span must not pass.
-  esm_lines=0
-  [[ -z "$esm_body" ]] || esm_lines="$(wc -l <<<"$esm_body")"
-  [[ "$esm_lines" -gt 300 ]] || {
-    printf 'FAIL: extension/extension.js has %s lines of shared code; expected more than 300 from "const UUID" to the end of the NoSleepIndicator class\n' "$esm_lines" >&2
-    exit 1
-  }
   # The legacy file has exactly one more line: the icon style, right after the
   # icon's style class. A style: ICON_STYLE line anywhere else is a difference.
   expected_legacy_body="$(awk -v style_class="            style_class: 'system-status-icon'," '
