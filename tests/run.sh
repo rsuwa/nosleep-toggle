@@ -1000,6 +1000,8 @@ test_install_variant_selection() {
   done
 
   # Only stdout of `gnome-shell --version` counts, and it is read with LC_ALL=C.
+  # install.sh gets another LC_ALL here: under an ambient LC_ALL=C the fake
+  # could not tell whether install.sh set it.
   home_dir="$root/home-stdout-only"
   mkdir -p "$home_dir"
   cat >"$fake_bin/gnome-shell-noisy" <<'FAKE_GNOME_SHELL'
@@ -1009,7 +1011,7 @@ printf 'GNOME Shell 46.0\n' >&2
 printf 'GNOME Shell 42.9\n'
 FAKE_GNOME_SHELL
   chmod +x "$fake_bin/gnome-shell-noisy"
-  run_install "$home_dir" "$fake_bin/gnome-shell-noisy" "$fake_bin/gnome-extensions" >/dev/null
+  LC_ALL=POSIX run_install "$home_dir" "$fake_bin/gnome-shell-noisy" "$fake_bin/gnome-extensions" >/dev/null
   assert_eq "$repo_root/extension-legacy" "$(readlink "$home_dir/$installer_extension_link")" 'extension link from gnome-shell stdout'
 
   # The variant is decided before any link is created: a checkout without the
