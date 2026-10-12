@@ -571,7 +571,7 @@ assert_legacy_code() {
 }
 
 test_extension_variants() {
-  local esm_body esm_lines legacy_body variant
+  local esm_body esm_click_policy esm_lines expected_legacy_body legacy_body variant
 
   # GNOME Shell 45+ runs import() on extension/extension.js.
   extension_source_matches extension '^export default class ' 'has no default export class'
@@ -640,8 +640,18 @@ function init(extension) {
 }
 PINNED
 
+  # The parity check skips the click-policy method of each file. The ES
+  # module's is not pinned, so make sure the range skipped there is that one
+  # method: only its header and its closing brace are indented less than a
+  # method body.
+  esm_click_policy="$(extension_source_part extension vfunc_button_press_event click-policy)"
+  [[ "$(grep -c -v -E -e '^(        |[[:space:]]*$)' <<<"$esm_click_policy")" -eq 2 ]] || {
+    printf 'FAIL: extension/extension.js click-policy range is not exactly one method\n' >&2
+    exit 1
+  }
+
   esm_body="$(extension_source_part extension vfunc_button_press_event shared)"
-  legacy_body="$(extension_source_part extension-legacy vfunc_event shared | sed '/^            style: ICON_STYLE,$/d')"
+  legacy_body="$(extension_source_part extension-legacy vfunc_event shared)"
   # Sanity floor (344 lines today): an empty or truncated span must not pass.
   esm_lines=0
   [[ -z "$esm_body" ]] || esm_lines="$(wc -l <<<"$esm_body")"
@@ -649,9 +659,15 @@ PINNED
     printf 'FAIL: extension/extension.js has %s lines of shared code; expected more than 300 from "const UUID" to the end of the NoSleepIndicator class\n' "$esm_lines" >&2
     exit 1
   }
-  if [[ "$esm_body" != "$legacy_body" ]]; then
+  # The legacy file has exactly one more line: the icon style, right after the
+  # icon's style class. A style: ICON_STYLE line anywhere else is a difference.
+  expected_legacy_body="$(awk -v style_class="            style_class: 'system-status-icon'," '
+    { print }
+    $0 == style_class { print "            style: ICON_STYLE," }
+  ' <<<"$esm_body")"
+  if [[ "$legacy_body" != "$expected_legacy_body" ]]; then
     printf 'FAIL: shared extension code differs between extension/ and extension-legacy/\n' >&2
-    diff <(printf '%s\n' "$esm_body") <(printf '%s\n' "$legacy_body") | head -n 20 >&2 || true
+    diff <(printf '%s\n' "$expected_legacy_body") <(printf '%s\n' "$legacy_body") | head -n 20 >&2 || true
     exit 1
   fi
 }
