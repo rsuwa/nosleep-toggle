@@ -767,9 +767,12 @@ if [[ "\${1:-}" == "enable" ]]; then
 fi
 FAKE_GNOME_EXTENSIONS
   chmod +x "$fake_bin/gnome-extensions"
+  printf '#!/bin/bash\nprintf "GNOME Shell 46.0\\n"\n' >"$fake_bin/gnome-shell"
+  chmod +x "$fake_bin/gnome-shell"
 
   HOME="$home_dir" PATH="$fake_bin:$PATH" \
     NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
+    NOSLEEP_GNOME_SHELL_CMD="$fake_bin/gnome-shell" \
     "$repo_root/install.sh" >/dev/null 2>/dev/null
   assert_eq "$repo_root/bin/nosleep" "$(readlink "$home_dir/.local/bin/nosleep")" 'installed CLI link'
   assert_eq "$repo_root/extension" "$(readlink "$home_dir/.local/share/gnome-shell/extensions/$extension_uuid")" 'installed extension link'
