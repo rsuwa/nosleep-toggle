@@ -61,7 +61,21 @@ node_supports_eslint() {
 }
 
 test_js_lint() {
-  local node_version
+  local node_version version
+
+  # A wrong boundary would only skip the lint below, so check the helper first; this needs no Node.js.
+  for version in v18.18.0 v18.19.1 v20.9.0 v20.19.2 v21.1.0 v22.0.0 v100.0.0; do
+    if ! node_supports_eslint "$version"; then
+      printf 'FAIL: node_supports_eslint rejected "%s", which ESLint 9 supports\n' "$version" >&2
+      exit 1
+    fi
+  done
+  for version in v12.22.9 v18.9.0 v18.17.1 v19.9.0 v20.8.1 v21.0.0 22.16.0 ''; do
+    if node_supports_eslint "$version"; then
+      printf 'FAIL: node_supports_eslint accepted "%s", which ESLint 9 does not support\n' "$version" >&2
+      exit 1
+    fi
+  done
 
   if [[ ! -x "$repo_root/node_modules/.bin/eslint" ]]; then
     printf 'SKIP: JS lint skipped because npm dependencies are not installed\n'
