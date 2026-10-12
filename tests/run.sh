@@ -1022,13 +1022,14 @@ FAKE_GNOME_SHELL
   cp "$repo_root/install.sh" "$incomplete_checkout/install.sh"
   cp "$repo_root/bin/nosleep" "$incomplete_checkout/bin/nosleep"
   cp -R "$repo_root/extension" "$incomplete_checkout/extension"
-  if HOME="$home_dir" \
+  if output="$(HOME="$home_dir" \
     NOSLEEP_GNOME_SHELL_CMD="$fake_bin/gnome-shell-42" \
     NOSLEEP_GNOME_EXTENSIONS_CMD="$fake_bin/gnome-extensions" \
-    "$incomplete_checkout/install.sh" >/dev/null 2>&1; then
+    "$incomplete_checkout/install.sh" 2>&1)"; then
     printf 'FAIL: install succeeded without the extension variant it needs\n' >&2
     exit 1
   fi
+  assert_output_contains "$output" 'Missing extension files' 'install from a checkout without extension-legacy'
   assert_no_path "$home_dir/.local" 'install from a checkout without extension-legacy'
 }
 
